@@ -1,0 +1,109 @@
+{
+  "name": "Guardian AI Agent - Payment Safety Check",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chainChatTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "webhookId": "guardian-chat-trigger"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are a finance assistant that helps users send payments.\n\nCRITICAL RULE: You MUST call the guardian_safety_check tool BEFORE confirming ANY payment. Never skip this step.\n\nWhen a user asks to send money:\n1. Call guardian_safety_check with actionType, amount, and recipient\n2. Wait for the result\n3. If canProceed is true: confirm the payment was approved\n4. If canProceed is false: explain why (denied or needs approval)\n\nYou cannot send payments without calling the safety check tool first."
+        }
+      },
+      "id": "ai-agent",
+      "name": "Finance Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "openai-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [180, 260],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Check if an action is allowed by company policy before executing it. You MUST call this tool before confirming any payment, transfer, or sensitive action. Pass actionType (required), amount (optional), recipient (optional). Returns ALLOW (safe to proceed), DENY (blocked by policy), or REQUIRE_APPROVAL (needs human approval).",
+        "requester": "n8n-ai-agent"
+      },
+      "id": "guardian-tool",
+      "name": "Guardian Safety",
+      "type": "n8n-nodes-guardian.guardianTool",
+      "typeVersion": 1,
+      "position": [440, 260],
+      "credentials": {
+        "guardianApi": {
+          "id": "guardian-cred",
+          "name": "Guardian API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian Safety": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "guardian-ai-agent-workflow",
+  "tags": []
+}

@@ -1,0 +1,265 @@
+{
+  "name": "Guardian Email Autopilot - Zero-Touch Approvals",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Start here\n1. Install **n8n-nodes-guardian 0.4.1**.\n2. Add OpenAI, SMTP, and Guardian credentials.\n3. For a signed Guardian key, paste both the `gk_` API key and one-time `gs_` signing secret.\n4. Set your sender address in **Send Verified Email**.\n5. Activate this workflow. The approval webhook registers automatically.\n\nYou do not create or copy a Guardian webhook manually.",
+        "height": 300,
+        "width": 430,
+        "color": 5
+      },
+      "id": "setup-note",
+      "name": "START HERE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-700, -500]
+    },
+    {
+      "parameters": {
+        "content": "## Hard security boundary\nThe AI only proposes an intent. It cannot reach SMTP directly.\n\nGuardian Enforce re-fetches the authoritative payload, validates the action identity, checks the payload hash, and atomically claims execution.\n\nSMTP reads `payloadJson` returned by Guardian—not recipient/body fields authored downstream by the model.",
+        "height": 280,
+        "width": 430,
+        "color": 4
+      },
+      "id": "security-note",
+      "name": "WHY THIS IS SAFE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [760, -500]
+    },
+    {
+      "parameters": {
+        "content": "## Async approvals without waiting\nA manager can approve hours later. Guardian sends a signed event and starts a fresh execution here.\n\nThe webhook is HMAC-verified before workflow execution. Duplicate deliveries are stopped by Guardian's atomic execution claim.",
+        "height": 240,
+        "width": 430,
+        "color": 6
+      },
+      "id": "approval-note",
+      "name": "ZERO-TOUCH APPROVAL",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-700, 380]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "options": {
+          "title": "Guardian Email Autopilot",
+          "subtitle": "AI email assistant with enforced policy and automatic approvals",
+          "inputPlaceholder": "Send an email to..."
+        }
+      },
+      "id": "chat-trigger",
+      "name": "Chat with Email Assistant",
+      "type": "@n8n/n8n-nodes-langchain.chainChatTrigger",
+      "typeVersion": 1.1,
+      "position": [-620, -100],
+      "webhookId": "guardian-email-autopilot-chat"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are Guardian Email Autopilot, a precise executive email assistant.\n\nGather an exact recipient, subject, and body, then request Guardian authorization.\n\nRULES:\n1. If recipient, subject, or body is missing or ambiguous, do not call Guardian. Return ready=false, decision=NEEDS_INPUT, empty intentRunId/actionType/recipient/subject/body, and ask one concise clarification in message.\n2. Before any email can be sent, call guardian_safety_check exactly once with actionType=email.send and the COMPLETE exact payload containing recipient, subject, and body. Never send only a preview.\n3. Copy intentRunId, decision, and actionType from the tool result exactly. Never invent or modify them.\n4. Return ready=true only after a successful Guardian tool call.\n5. ALLOW means the workflow will independently verify and claim the action. Do not claim the email is already sent.\n6. REQUIRE_APPROVAL means the request is safely queued and will continue automatically after approval.\n7. DENY means no email will be sent.\n8. Always satisfy the connected output schema."
+        }
+      },
+      "id": "email-agent",
+      "name": "Email Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [-350, -100]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": { "temperature": 0 }
+      },
+      "id": "openai-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [-480, 170],
+      "credentials": { "openAiApi": { "id": "REPLACE_OPENAI_CREDENTIAL", "name": "OpenAI account" } }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "fromInput",
+        "contextWindowLength": 10
+      },
+      "id": "conversation-memory",
+      "name": "Conversation Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [-270, 170]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"ready\": { \"type\": \"boolean\" },\n    \"decision\": { \"type\": \"string\", \"enum\": [\"ALLOW\", \"DENY\", \"REQUIRE_APPROVAL\", \"NEEDS_INPUT\", \"ERROR\"] },\n    \"intentRunId\": { \"type\": \"string\" },\n    \"actionType\": { \"type\": \"string\" },\n    \"recipient\": { \"type\": \"string\" },\n    \"subject\": { \"type\": \"string\" },\n    \"body\": { \"type\": \"string\" },\n    \"message\": { \"type\": \"string\" }\n  },\n  \"required\": [\"ready\", \"decision\", \"intentRunId\", \"actionType\", \"recipient\", \"subject\", \"body\", \"message\"]\n}",
+        "autoFix": true
+      },
+      "id": "structured-output",
+      "name": "Structured Output Contract",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [-60, 170]
+    },
+    {
+      "parameters": {
+        "mode": "evaluate",
+        "toolDescription": "Mandatory authorization boundary for email. Call exactly once before returning ready=true. Use actionType email.send and provide the complete exact recipient, subject, and body. The tool creates a server-side intent and returns decision, intentRunId, actionType, and payload. Copy those values exactly. Never invent authorization.",
+        "requester": "n8n-email-autopilot"
+      },
+      "id": "guardian-tool",
+      "name": "Guardian Safety Check",
+      "type": "n8n-nodes-guardian.guardianTool",
+      "typeVersion": 1,
+      "position": [160, 170],
+      "credentials": { "guardianApi": { "id": "REPLACE_GUARDIAN_CREDENTIAL", "name": "Guardian API" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const value = $json.output;\nlet data;\ntry {\n  data = typeof value === 'string' ? JSON.parse(value) : value;\n} catch {\n  data = null;\n}\nconst fail = (message, validationError) => [{ json: { ready: false, decision: 'ERROR', intentRunId: '', actionType: '', recipient: '', subject: '', body: '', message, validationError } }];\nif (!data || typeof data !== 'object' || Array.isArray(data)) return fail('I could not create a valid email request. Please try again.', 'Structured agent output was missing.');\nconst message = typeof data.message === 'string' && data.message.trim() ? data.message.trim() : 'Please provide the missing email details.';\nif (data.ready !== true) return [{ json: { ready: false, decision: data.decision === 'NEEDS_INPUT' ? 'NEEDS_INPUT' : 'ERROR', intentRunId: '', actionType: '', recipient: '', subject: '', body: '', message } }];\nconst intentRunId = typeof data.intentRunId === 'string' ? data.intentRunId.trim() : '';\nconst actionType = typeof data.actionType === 'string' ? data.actionType.trim() : '';\nconst recipient = typeof data.recipient === 'string' ? data.recipient.trim() : '';\nconst subject = typeof data.subject === 'string' ? data.subject.trim() : '';\nconst body = typeof data.body === 'string' ? data.body.trim() : '';\nconst decision = typeof data.decision === 'string' ? data.decision.toUpperCase() : '';\nif (!intentRunId || actionType !== 'email.send' || !['ALLOW', 'DENY', 'REQUIRE_APPROVAL'].includes(decision)) return fail('Guardian authorization could not be verified. No email was sent.', 'Missing or invalid Guardian authorization identity.');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(recipient) || !subject || !body) return fail('The email details were invalid. No email was sent.', 'Recipient, subject, or body failed validation.');\nreturn [{ json: { ready: true, decision, intentRunId, actionType, recipient, subject, body, message } }];"
+      },
+      "id": "validate-agent-output",
+      "name": "Fail-Closed Output Validation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, -100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [{ "id": "ready-check", "leftValue": "={{ $json.ready }}", "rightValue": "", "operator": { "type": "boolean", "operation": "true", "singleValue": true } }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ready-gate",
+      "name": "Ready for Hard Gate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [190, -100]
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [{ "id": "needs-input-message", "name": "chatOutput", "value": "={{ $json.message }}", "type": "string" }] },
+        "options": {}
+      },
+      "id": "needs-input-response",
+      "name": "Ask for Missing Details",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, 20]
+    },
+    {
+      "parameters": { "includeRejected": false },
+      "id": "approval-trigger",
+      "name": "Guardian Approval Resolved",
+      "type": "n8n-nodes-guardian.guardianApprovalTrigger",
+      "typeVersion": 1,
+      "position": [-600, 500],
+      "webhookId": "guardian-email-approval-resolved",
+      "credentials": { "guardianApi": { "id": "REPLACE_GUARDIAN_CREDENTIAL", "name": "Guardian API" } }
+    },
+    {
+      "parameters": {
+        "intentRunId": "={{ $json.intentRunId }}",
+        "claimExecution": "claim",
+        "expectedActionType": "={{ $json.actionType }}",
+        "expectedProjectSlug": "",
+        "expectedIdempotencyKey": "",
+        "testMode": false
+      },
+      "id": "guardian-verify",
+      "name": "Verify and Claim Exact Intent",
+      "type": "n8n-nodes-guardian.guardianVerify",
+      "typeVersion": 1,
+      "position": [520, -180],
+      "credentials": { "guardianApi": { "id": "REPLACE_GUARDIAN_CREDENTIAL", "name": "Guardian API" } }
+    },
+    {
+      "parameters": {
+        "fromEmail": "YOUR_SENDER@example.com",
+        "toEmail": "={{ $json.payloadJson.recipient }}",
+        "subject": "={{ $json.payloadJson.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.payloadJson.body }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Verified Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.2,
+      "position": [800, -300],
+      "credentials": { "smtp": { "id": "REPLACE_SMTP_CREDENTIAL", "name": "SMTP account" } }
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [{ "id": "success-message", "name": "chatOutput", "value": "=✅ Email sent after Guardian verification. Intent: {{ $('Verify and Claim Exact Intent').item.json.intentRunId }}", "type": "string" }] },
+        "options": {}
+      },
+      "id": "success-response",
+      "name": "Verified Send Complete",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1050, -300]
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [{ "id": "denied-message", "name": "chatOutput", "value": "=❌ Guardian blocked this email. {{ $json.decisionReason || $json.error || '' }}", "type": "string" }] },
+        "options": {}
+      },
+      "id": "denied-response",
+      "name": "Policy Denied",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [800, -140]
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [{ "id": "approval-message", "name": "chatOutput", "value": "=🛡️ Guardian queued this email for approval. It will send automatically after approval. Intent: {{ $json.intentRunId }}", "type": "string" }] },
+        "options": {}
+      },
+      "id": "approval-response",
+      "name": "Approval Queued",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [800, 20]
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [{ "id": "error-message", "name": "chatOutput", "value": "=⚠️ Guardian verification failed closed. No email was sent. {{ $json.error || '' }}", "type": "string" }] },
+        "options": {}
+      },
+      "id": "error-response",
+      "name": "Fail Closed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [800, 180]
+    }
+  ],
+  "connections": {
+    "Chat with Email Assistant": { "main": [[{ "node": "Email Agent", "type": "main", "index": 0 }]] },
+    "Email Agent": { "main": [[{ "node": "Fail-Closed Output Validation", "type": "main", "index": 0 }]] },
+    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "Email Agent", "type": "ai_languageModel", "index": 0 }, { "node": "Structured Output Contract", "type": "ai_languageModel", "index": 0 }]] },
+    "Conversation Memory": { "ai_memory": [[{ "node": "Email Agent", "type": "ai_memory", "index": 0 }]] },
+    "Structured Output Contract": { "ai_outputParser": [[{ "node": "Email Agent", "type": "ai_outputParser", "index": 0 }]] },
+    "Guardian Safety Check": { "ai_tool": [[{ "node": "Email Agent", "type": "ai_tool", "index": 0 }]] },
+    "Fail-Closed Output Validation": { "main": [[{ "node": "Ready for Hard Gate?", "type": "main", "index": 0 }]] },
+    "Ready for Hard Gate?": { "main": [[{ "node": "Verify and Claim Exact Intent", "type": "main", "index": 0 }], [{ "node": "Ask for Missing Details", "type": "main", "index": 0 }]] },
+    "Guardian Approval Resolved": { "main": [[{ "node": "Verify and Claim Exact Intent", "type": "main", "index": 0 }]] },
+    "Verify and Claim Exact Intent": { "main": [[{ "node": "Send Verified Email", "type": "main", "index": 0 }], [{ "node": "Policy Denied", "type": "main", "index": 0 }], [{ "node": "Approval Queued", "type": "main", "index": 0 }], [{ "node": "Fail Closed", "type": "main", "index": 0 }]] },
+    "Send Verified Email": { "main": [[{ "node": "Verified Send Complete", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "guardian-email-autopilot-v1",
+  "meta": { "templateCredsSetupCompleted": false },
+  "id": "guardian-email-autopilot",
+  "tags": []
+}

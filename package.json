@@ -1,0 +1,59 @@
+{
+  "name": "n8n-nodes-guardian",
+  "version": "0.7.2",
+  "description": "n8n community nodes for Guardian Safety Gate — HMAC-signed policy enforcement, atomic execution claims, and automatic human approvals for AI workflows.",
+  "keywords": [
+    "n8n-community-node-package",
+    "guardian",
+    "safety",
+    "governance",
+    "approval",
+    "workflow",
+    "ai-agent"
+  ],
+  "license": "MIT",
+  "homepage": "https://guardiansafetygate.com",
+  "author": {
+    "name": "Guardian Safety Gate"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/X-Guardian-X/n8n-nodes-guardian.git"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && npm run copy:assets",
+    "copy:assets": "node -e \"const fs=require('fs');for(const d of['Guardian','GuardianTool','GuardianVerify','GuardianApprovalTrigger','GuardianGate'])fs.cpSync('nodes/Guardian/guardian.svg','dist/nodes/'+d+'/guardian.svg',{recursive:true})\"",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "release": "n8n-node release"
+  },
+  "files": [
+    "dist",
+    "demo/guardian-email-autopilot-workflow.json"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/GuardianApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Guardian/Guardian.node.js",
+      "dist/nodes/GuardianTool/GuardianTool.node.js",
+      "dist/nodes/GuardianVerify/GuardianVerify.node.js",
+      "dist/nodes/GuardianApprovalTrigger/GuardianApprovalTrigger.node.js",
+      "dist/nodes/GuardianGate/GuardianGate.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@langchain/core": "^1.2.5",
+    "@n8n/node-cli": "^0.45.4",
+    "@types/node": "^18.19.130",
+    "n8n-workflow": "^2.16.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@langchain/core": "*",
+    "n8n-workflow": "*"
+  }
+}

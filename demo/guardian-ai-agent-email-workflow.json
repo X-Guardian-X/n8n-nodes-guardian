@@ -1,0 +1,299 @@
+{
+  "name": "Guardian AI Agent - Email Safety Check",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chainChatTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "webhookId": "guardian-email-chat-trigger"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are an executive assistant that helps users send emails.\n\nCRITICAL RULES:\n1. Ask the user for recipient, subject, and body if they are not clear.\n2. You MUST call the guardian_safety_check tool BEFORE sending ANY email, especially to external recipients or when the content is sensitive. Pass recipient, subject, and a short bodyPreview in the tool.\n3. The tool returns a decision (ALLOW, DENY, REQUIRE_APPROVAL) and an intentRunId.\n4. In your FINAL response you MUST output ONLY a single JSON object (no markdown, no explanation outside the JSON) so the workflow can verify the intent and send the email. Use this exact schema:\n\n{\n  \"intentRunId\": \"<string>\",\n  \"decision\": \"<ALLOW|DENY|REQUIRE_APPROVAL>\",\n  \"actionType\": \"<string>\",\n  \"recipient\": \"<email address>\",\n  \"subject\": \"<email subject>\",\n  \"body\": \"<email body>\",\n  \"message\": \"<brief message to user>\"\n}\n\n5. If DENY, set decision to DENY and explain in the message. Do not send the email.\n6. If REQUIRE_APPROVAL, set decision to REQUIRE_APPROVAL and tell the user the email is submitted for manager approval.\n7. If ALLOW, set decision to ALLOW and confirm briefly in the message."
+        }
+      },
+      "id": "ai-agent",
+      "name": "Email Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "openai-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [180, 260],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "evaluate",
+        "toolDescription": "REQUIRED safety gate: Check if an email is allowed by Guardian policy before sending it. You MUST call this tool before confirming any email, especially to external recipients or when the content is sensitive. Pass actionType (required), recipient (optional), subject (optional), bodyPreview (optional). Returns a decision (ALLOW, DENY, REQUIRE_APPROVAL), an intentRunId, and actionType. CRITICAL: In your final response you MUST output ONLY a single JSON object with fields: intentRunId, decision, actionType, recipient, subject, body, message. Do not add markdown fences or extra text outside the JSON.",
+        "requester": "n8n-email-agent"
+      },
+      "id": "guardian-tool",
+      "name": "Guardian Safety",
+      "type": "n8n-nodes-guardian.guardianTool",
+      "typeVersion": 1,
+      "position": [440, 260],
+      "credentials": {
+        "guardianApi": {
+          "id": "guardian-cred",
+          "name": "Guardian API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $json.output || '';\nlet parsed = {};\ntry {\n  // Try to extract JSON from markdown fences or raw output\n  const jsonMatch = output.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  const jsonString = jsonMatch ? jsonMatch[1].trim() : output.trim();\n  parsed = JSON.parse(jsonString);\n} catch (e) {\n  // If strict JSON parsing fails, try to find the first JSON object\n  const looseMatch = output.match(/{[\\s\\S]*}/);\n  if (looseMatch) {\n    try {\n      parsed = JSON.parse(looseMatch[0]);\n    } catch {}\n  }\n}\n\nreturn [{\n  json: {\n    intentRunId: parsed.intentRunId || '',\n    decision: typeof parsed.decision === 'string' ? parsed.decision.toUpperCase() : '',\n    actionType: parsed.actionType || '',\n    recipient: parsed.recipient || '',\n    subject: parsed.subject || '',\n    body: parsed.body || '',\n    message: parsed.message || '',\n    rawOutput: output,\n    parseError: !parsed.intentRunId ? 'Could not parse JSON from AI response' : undefined\n  }\n}];"
+      },
+      "id": "parse-guardian-response",
+      "name": "Parse Guardian Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 0]
+    },
+    {
+      "parameters": {
+        "intentRunId": "={{ $json.intentRunId }}",
+        "expectedActionType": "={{ $json.actionType }}"
+      },
+      "id": "guardian-verify",
+      "name": "Guardian Verify",
+      "type": "n8n-nodes-guardian.guardianVerify",
+      "typeVersion": 1,
+      "position": [660, 0],
+      "credentials": {
+        "guardianApi": {
+          "id": "guardian-cred",
+          "name": "Guardian API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "admin@example.com",
+        "toEmail": "={{ $json.recipient }}",
+        "subject": "={{ $json.subject || 'No subject' }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body || 'No body' }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.2,
+      "position": [860, -140],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-cred",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "deny-msg",
+              "name": "chatOutput",
+              "value": "=❌ {{ $json.message || 'This email was blocked by Guardian policy.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "deny-response",
+      "name": "Denied Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [860, 0]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "limitType": "afterTimeInterval",
+          "resumeAmount": 24,
+          "resumeUnit": "hours"
+        }
+      },
+      "id": "approval-wait",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [860, 140],
+      "webhookId": "guardian-email-approval-wait"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-msg",
+              "name": "chatOutput",
+              "value": "=⚠️ {{ $json.parseError || 'Could not verify this email with Guardian. No email was sent.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [860, 280]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "success-msg",
+              "name": "chatOutput",
+              "value": "=✅ {{ $json.message || 'Email sent and verified by Guardian.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1060, -140]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Guardian Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian Safety": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Guardian Response": {
+      "main": [
+        [
+          {
+            "node": "Guardian Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian Verify": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Denied Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "guardian-ai-agent-email-workflow",
+  "tags": []
+}

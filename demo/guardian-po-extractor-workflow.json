@@ -1,0 +1,604 @@
+{
+  "name": "Felix PO Extractor with Guardian",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Purchase Order Intake",
+        "formDescription": "Upload one or more purchase order PDFs to extract line items.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Purchase Order PDF",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [-464, 400],
+      "id": "f1b66096-fe39-4f16-98fb-10ac2e3f6acd",
+      "name": "On form submission",
+      "webhookId": "058ea4b1-45ef-47a0-abc7-f84cf7bacb0a"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [80, 400],
+      "id": "35b8cef7-1766-4e14-9e6e-cedee80180ce",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "@easybits/n8n-nodes-extractor.easybitsExtractor",
+      "typeVersion": 2,
+      "position": [352, 640],
+      "id": "6818b6b4-d31a-40eb-9bb0-60521c22be3e",
+      "name": "Extract: PO Data",
+      "credentials": {
+        "easybitsExtractorApi": {
+          "id": "22Ph4xiP0AnhQzwg",
+          "name": "Easybits Extractor account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const isMissing = (v) => {\n  if (v === null || v === undefined) return true;\n  const s = String(v).trim().toLowerCase();\n  return s === '' || s === 'null';\n};\nconst clean = (v) => (isMissing(v) ? '' : v);\n\nconst fileName = $('Loop Over Items').first().json.fileName || 'Unknown document';\n\nconst sd = $getWorkflowStaticData('global');\nif (!Array.isArray(sd.flags)) sd.flags = [];\n\nconst rows = [];\n\nfor (const item of $input.all()) {\n  const po = item.json.data || {};\n  const articles = Array.isArray(po.articles) ? po.articles : [];\n\n  const missingHeader = [];\n  const headerChecks = {\n    'Mark For': po.mark_for,\n    'PO Number': po.po_number,\n    'PO Date': po.po_date,\n    'Delivery Date': po.delivery_date,\n    'PR Number': po.pr_number,\n  };\n  for (const [label, val] of Object.entries(headerChecks)) {\n    if (isMissing(val)) missingHeader.push(label);\n  }\n\n  const badArticles = [];\n  if (articles.length === 0) {\n    badArticles.push('no articles extracted');\n  } else {\n    articles.forEach((a, i) => {\n      const miss = [];\n      if (isMissing(a.article)) miss.push('name');\n      if (isMissing(a.unit)) miss.push('unit');\n      if (isMissing(a.quantity)) miss.push('quantity');\n      if (miss.length) badArticles.push(`row ${i + 1} (${miss.join(', ')})`);\n    });\n  }\n\n  const hasFlags = missingHeader.length > 0 || badArticles.length > 0;\n  if (missingHeader.length || badArticles.length) {\n    sd.flags.push({ document: fileName, missingHeader, badArticles });\n  }\n\n  for (const a of articles) {\n    rows.push({\n      json: {\n        'Document Name': fileName,\n        'PO Number': clean(po.po_number),\n        'PO Date': clean(po.po_date),\n        'Delivery Date': clean(po.delivery_date),\n        'Mark For': clean(po.mark_for),\n        'PR Number': clean(po.pr_number),\n        'Reference No.': clean(po.reference_no),\n        'Article': clean(a.article),\n        'Unit': clean(a.unit),\n        'Quantity': clean(a.quantity),\n        'hasFlags': String(hasFlags),\n      },\n    });\n  }\n}\n\nreturn rows;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [624, 640],
+      "id": "50896c32-843a-46e3-b183-19cf028b0d33",
+      "name": "Build: Article Rows"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd = $getWorkflowStaticData('global');\nsd.flags = [];\n\nconst out = [];\n\nfor (const item of $input.all()) {\n  const bin = item.binary || {};\n  for (const key of Object.keys(bin)) {\n    out.push({\n      json: { fileName: bin[key].fileName || key },\n      binary: { data: bin[key] },\n    });\n  }\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-192, 400],
+      "id": "f99cfb16-2dcb-46a4-9598-585d98916c39",
+      "name": "Prepare: Split PDFs"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1oHOiufkWueWduDhpo-fmoaHanOESATEr7_ZFRue0diU",
+          "mode": "list",
+          "cachedResultName": "Guardian PO Extractor Test",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1oHOiufkWueWduDhpo-fmoaHanOESATEr7_ZFRue0diU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tabellenblatt1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Document Name": "={{ $json[\"Document Name\"] }}",
+            "PO Number": "={{ $json[\"PO Number\"] }}",
+            "PO Date": "={{ $json[\"PO Date\"] }}",
+            "Delivery Date": "={{ $json[\"Delivery Date\"] }}",
+            "Mark For": "={{ $json[\"Mark For\"] }}",
+            "PR Number": "={{ $json[\"PR Number\"] }}",
+            "Reference No.": "={{ $json[\"Reference No.\"] }}",
+            "Article": "={{ $json[\"Article\"] }}",
+            "Unit": "={{ $json[\"Unit\"] }}",
+            "Quantity": "={{ $json[\"Quantity\"] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Document Name", "displayName": "Document Name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "PO Number", "displayName": "PO Number", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "PO Date", "displayName": "PO Date", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Delivery Date", "displayName": "Delivery Date", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Mark For", "displayName": "Mark For", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "PR Number", "displayName": "PR Number", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Reference No.", "displayName": "Reference No.", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Article", "displayName": "Article", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Unit", "displayName": "Unit", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Quantity", "displayName": "Quantity", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1920, 672],
+      "id": "75d24d09-1bd9-4fc5-a41a-5f319c373c21",
+      "name": "Append: PO Rows to Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "laaLNxwb2DLMC1cU",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd = $getWorkflowStaticData('global');\nconst flags = Array.isArray(sd.flags) ? sd.flags : [];\nlet message;\nif (flags.length === 0) {\n  message = 'All documents were extracted cleanly. No missing fields detected — all rows have been written to the sheet.';\n} else {\n  const parts = flags.map((f) => {\n    const lines = [];\n    if (f.missingHeader.length) {\n      lines.push(`Missing header fields: ${f.missingHeader.join(', ')}`);\n    }\n    if (f.badArticles.length) {\n      lines.push(`Article issues: ${f.badArticles.join('; ')}`);\n    }\n    return `• ${f.document}\\n   ${lines.join('\\n   ')}`;\n  });\n  const count = flags.length;\n  message =\n    `${count} document${count === 1 ? '' : 's'} held for review — nothing was written to the sheet for ${count === 1 ? 'it' : 'them'} yet.\\n` +\n    'Once approved in Guardian, the rows are written automatically. Clean documents from this run are already in the sheet.\\n\\n' +\n    'Flagged items:\\n\\n' +\n    parts.join('\\n\\n');\n}\nreturn [{ json: { summaryText: message } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [352, 224],
+      "id": "376f6e5a-b048-48f1-9890-00ae783da496",
+      "name": "Build: Flag Summary"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Extraction complete",
+        "completionMessage": "={{ $json.summaryText }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [624, 224],
+      "id": "85172ce7-44a7-4636-a9da-6f69c98e2609",
+      "name": "Form: Completion",
+      "webhookId": "d7d85bab-29b6-46ba-930e-e5a6bb47aed1"
+    },
+    {
+      "parameters": {
+        "content": "## ✂️ Split & Rename\nSplits a multi-file upload into **one item per PDF** and renames each binary to `data` (the name the Extractor expects). Also **resets the flag buffer** so warnings from a previous run don't carry over.",
+        "height": 336,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [-272, 208],
+      "typeVersion": 1,
+      "id": "43984c6a-ee4e-4b87-b6ee-5eb555c18dca",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## 🔁 One PO at a time\nBatch size **1**. The Extractor bundles all inputs into a single call, so each PDF must pass through on its own. The **loop** output processes each PO, the **done** output fires once at the end.",
+        "height": 336,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [0, 208],
+      "typeVersion": 1,
+      "id": "12d9914e-0345-4d6a-8dc0-cf2ac38301c5",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## 🚩 Build Warnings\nReads the flags collected during the run and builds the message for the end screen. If nothing was flagged, it reports a **clean extraction**. Runs once, on the loop's **done** output.",
+        "height": 352,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [272, 32],
+      "typeVersion": 1,
+      "id": "1d8ea34f-6d87-4626-98c1-349f35e2b473",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## 🤖 Extract with easybits\nReads the header fields and the full article table from one PDF. Output is wrapped in a `data` envelope. Field setup lives in the Extractor credential – see the main note for the field list and descriptions.",
+        "height": 400,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [272, 400],
+      "typeVersion": 1,
+      "id": "619f220b-7416-4650-b6fb-9eb504a1b520",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## 🧩 Flatten to Rows\nTurns each PO into **one row per article**, stapling the header fields (PO Number, dates, Mark For, PR Number) onto every line. Adds the **Document Name**. Cleans every empty value (`null`, `NULL`, `\"\"`, blanks) to an empty cell and **records a flag** per document if anything is missing.",
+        "height": 400,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [544, 400],
+      "typeVersion": 1,
+      "id": "5320af28-70a2-4af5-8f55-1766402fb426",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "## 📊 Write to Sheet\nAppends every article row to the Google Sheet. **RAW** value mode keeps quantities and special characters literal. Columns map automatically – the header row in the sheet must match the field names exactly.",
+        "height": 400,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [1856, 432],
+      "typeVersion": 1,
+      "id": "0d0393fe-5816-4f71-9fd8-47de9b37e5b0",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "## ✅ End Screen\nShows the user the result after processing. Lists **which documents and which fields** may not have extracted fully, so they know what to double-check against the original PDF.",
+        "height": 352,
+        "width": 256,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [544, 32],
+      "typeVersion": 1,
+      "id": "7b5b6eef-0914-4d65-8cab-085baa83f7d9",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "## 🛡️ Guardian Check\nEvaluates the PO against Guardian policy before writing to the sheet.\n\n**3 outputs:**\n- **Allowed** → rows go to the sheet\n- **Denied** → rows skipped, loop continues\n- **Needs Approval** → rows skipped, approver gets notified in Guardian\n\nIn **Listen Mode**, everything goes through Allowed (OBSERVED). Check the audit trail to see what *would* have been denied, then create policies and turn off Listen Mode.",
+        "height": 400,
+        "width": 300,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [816, 432],
+      "typeVersion": 1,
+      "id": "note-guardian-check",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "## 🔄 Async Approval Flow\nWhen a PO needs approval, the workflow doesn't wait. Once the approver clicks **Approve** (or **Edit & Approve**) in the Guardian dashboard:\n\n1. **Guardian Approval Trigger** fires\n2. **Guardian Execute** confirms the intent (atomically claims it — no duplicates)\n3. Rows are split out and written to the sheet\n\nNo manual webhook setup — the trigger auto-registers when the workflow is activated.",
+        "height": 400,
+        "width": 300,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [816, 800],
+      "typeVersion": 1,
+      "id": "note-approval-flow",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "rows",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [832, 640],
+      "id": "00498951-dcd7-4c29-957d-31c064c4a5c2",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "actionType": "po_extraction.sheet_append",
+        "payload": "={{ { \"po_number\": $json.rows[0][\"PO Number\"], \"hasFlags\": $json.rows[0].hasFlags, \"hasReference\": String($json.rows[0][\"Reference No.\"] !== '' && $json.rows[0][\"Reference No.\"] != null), \"articles\": $json.rows } }}",
+        "requester": "felix-po-workflow",
+        "projectSlug": "extractor-po",
+        "options": {}
+      },
+      "type": "n8n-nodes-guardian.guardian",
+      "typeVersion": 1,
+      "position": [1040, 640],
+      "id": "1395fdc9-c943-4cbd-9f99-dd84efef72d5",
+      "name": "Guardian",
+      "credentials": {
+        "guardianApi": {
+          "id": "U2lnZ0nvJ59e1aTH",
+          "name": "Second PO extractor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rows",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1536, 640],
+      "id": "0009ea2b-b380-4a43-b42f-ee9ea159aef0",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6b857a97-4500-41dc-a083-e3430627d310",
+              "name": "rows",
+              "value": "={{$('Aggregate').item.json.rows}}",
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1280, 496],
+      "id": "d86421a1-21a3-4e27-accc-1149ce332d39",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9f5cc843-d5c1-40ee-ad94-8700052e0e76",
+              "name": "rows",
+              "value": "={{$json.payloadJson.articles}}",
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1040, 976],
+      "id": "7df1b735-cee7-4bb6-b5b3-1520bc47450c",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "operation": "execute",
+        "intentRunId": "={{$('Guardian Approval Trigger').item.json.intentRunId}}",
+        "executePayload": "={{ $('Guardian Approval Trigger').item.json.payloadJson }}"
+      },
+      "type": "n8n-nodes-guardian.guardian",
+      "typeVersion": 1,
+      "position": [1312, 976],
+      "id": "2f2248bf-7653-47df-b1ee-da639d38b1c4",
+      "name": "Guardian1",
+      "credentials": {
+        "guardianApi": {
+          "id": "U2lnZ0nvJ59e1aTH",
+          "name": "Second PO extractor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rows",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1536, 976],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Split Out1"
+    },
+    {
+      "parameters": {
+        "actionTypeFilter": "po_extraction.sheet_append"
+      },
+      "type": "n8n-nodes-guardian.guardianApprovalTrigger",
+      "typeVersion": 1,
+      "position": [496, 960],
+      "id": "1e42241b-a0b2-40d1-b6ae-deb17e713016",
+      "name": "Guardian Approval Trigger",
+      "webhookId": "8306908b-718e-4e56-8984-3f34e7f3d1a2",
+      "credentials": {
+        "guardianApi": {
+          "id": "U2lnZ0nvJ59e1aTH",
+          "name": "Second PO extractor"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Split PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Build: Flag Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract: PO Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract: PO Data": {
+      "main": [
+        [
+          {
+            "node": "Build: Article Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: Article Rows": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Split PDFs": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: Flag Summary": {
+      "main": [
+        [
+          {
+            "node": "Form: Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Guardian",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Append: PO Rows to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append: PO Rows to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian Approval Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Guardian1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian1": {
+      "main": [
+        [
+          {
+            "node": "Split Out1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "node": "Append: PO Rows to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "guardian-po-extractor-v2",
+  "tags": []
+}

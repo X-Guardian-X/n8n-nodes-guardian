@@ -1,0 +1,303 @@
+{
+  "name": "Guardian AI Agent - Safety Tool + Verify",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chainChatTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "webhookId": "guardian-chat-trigger"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are a finance assistant that helps users send payments and perform other sensitive actions.\n\nCRITICAL RULES:\n1. You MUST call the guardian_safety_check tool BEFORE confirming ANY payment, transfer, or sensitive action.\n2. The tool returns a decision (ALLOW, DENY, REQUIRE_APPROVAL) and an intentRunId.\n3. In your FINAL response you MUST include these exact markers so the workflow can verify the intent with Guardian:\n\nINTENT_RUN_ID: <intentRunId>\nDECISION: <ALLOW|DENY|REQUIRE_APPROVAL>\nACTION_TYPE: <actionType>\n\n4. If the decision is DENY, explain why and do not proceed.\n5. If the decision is REQUIRE_APPROVAL, tell the user the action is submitted for manager approval.\n6. If ALLOW, confirm the action briefly and include the markers above."
+        }
+      },
+      "id": "ai-agent",
+      "name": "Finance Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "openai-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [180, 260],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "evaluate",
+        "toolDescription": "REQUIRED safety gate: Check if an action is allowed by Guardian policy before executing it. You MUST call this tool before confirming any payment, transfer, data export, user deletion, or sensitive action. Pass actionType (required), amount (optional), recipient (optional), reason (optional). Returns a decision (ALLOW, DENY, REQUIRE_APPROVAL), an intentRunId, and actionType. CRITICAL: In your final response you MUST include the intentRunId and decision using this exact format so the workflow can verify it with Guardian:\nINTENT_RUN_ID: <intentRunId>\nDECISION: <ALLOW|DENY|REQUIRE_APPROVAL>\nACTION_TYPE: <actionType>",
+        "requester": "n8n-ai-agent"
+      },
+      "id": "guardian-tool",
+      "name": "Guardian Safety",
+      "type": "n8n-nodes-guardian.guardianTool",
+      "typeVersion": 1,
+      "position": [440, 260],
+      "credentials": {
+        "guardianApi": {
+          "id": "guardian-cred",
+          "name": "Guardian API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $json.output || '';\nconst intentRunIdMatch = output.match(/INTENT_RUN_ID:\\s*([A-Za-z0-9_-]+)/);\nconst decisionMatch = output.match(/DECISION:\\s*(ALLOW|DENY|REQUIRE_APPROVAL)/i);\nconst actionTypeMatch = output.match(/ACTION_TYPE:\\s*([A-Za-z0-9_.-]+)/);\n\nreturn [{\n  json: {\n    intentRunId: intentRunIdMatch ? intentRunIdMatch[1] : '',\n    decision: decisionMatch ? decisionMatch[1].toUpperCase() : '',\n    actionType: actionTypeMatch ? actionTypeMatch[1] : '',\n    rawOutput: output\n  }\n}];"
+      },
+      "id": "parse-guardian-response",
+      "name": "Parse Guardian Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 0]
+    },
+    {
+      "parameters": {
+        "intentRunId": "={{ $json.intentRunId }}",
+        "expectedActionType": "={{ $json.actionType }}"
+      },
+      "id": "guardian-verify",
+      "name": "Guardian Verify",
+      "type": "n8n-nodes-guardian.guardianVerify",
+      "typeVersion": 1,
+      "position": [660, 0],
+      "credentials": {
+        "guardianApi": {
+          "id": "guardian-cred",
+          "name": "Guardian API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://httpbin.org/anything",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "Payment executed after Guardian verification"
+            },
+            {
+              "name": "intentRunId",
+              "value": "={{ $json.intentRunId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "execute-action",
+      "name": "Execute Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, -140]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "deny-msg",
+              "name": "chatOutput",
+              "value": "=❌ Action blocked: {{ $json.decisionReason || 'Policy violation' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "deny-response",
+      "name": "Denied Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [860, 0]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "limitType": "afterTimeInterval",
+          "resumeAmount": 24,
+          "resumeUnit": "hours"
+        }
+      },
+      "id": "approval-wait",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [860, 140],
+      "webhookId": "guardian-approval-wait"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-msg",
+              "name": "chatOutput",
+              "value": "=⚠️ Could not verify this action with Guardian. No action was taken.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [860, 280]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "approved-msg",
+              "name": "chatOutput",
+              "value": "=✅ {{ $json.status || 'Action executed' }} (verified by Guardian)",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1060, -140]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finance Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Guardian Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian Safety": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Guardian Response": {
+      "main": [
+        [
+          {
+            "node": "Guardian Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian Verify": {
+      "main": [
+        [
+          {
+            "node": "Execute Payment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Denied Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Payment": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "guardian-ai-agent-verify-workflow",
+  "tags": []
+}
