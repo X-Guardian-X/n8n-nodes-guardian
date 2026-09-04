@@ -4,7 +4,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { guardianApiRequest, type GuardianApiCredentials } from '../shared/guardianApiRequest';
 
 export class Guardian implements INodeType {
@@ -19,8 +19,8 @@ export class Guardian implements INodeType {
 		defaults: {
 			name: 'Guardian Check',
 		},
-		inputs: ['main'],
-		outputs: ['main', 'main', 'main'],
+		inputs: [NodeConnectionTypes.Main],
+		outputs: [NodeConnectionTypes.Main, NodeConnectionTypes.Main, NodeConnectionTypes.Main],
 		outputNames: ['Allowed', 'Denied', 'Needs Approval'],
 		credentials: [
 			{
@@ -57,7 +57,7 @@ export class Guardian implements INodeType {
 					{
 						name: 'Check Status',
 						value: 'checkStatus',
-						description: 'Poll a pending approval to see if it was approved or denied.',
+						description: 'Poll a pending approval to see if it was approved or denied',
 						action: 'Check intent status',
 					},
 				],
@@ -72,7 +72,7 @@ export class Guardian implements INodeType {
 				default: '',
 				required: true,
 				placeholder: '{{ $json.actionType }}',
-				description: 'Must match a policy in Guardian. Use an expression like {{ $json.actionType }} to get it from the previous node, or type a fixed value like "payment.send".',
+				description: 'Must match a policy in Guardian. Use an expression like {{ $JSON.actionType }} to get it from the previous node, or type a fixed value like "payment.send".',
 				displayOptions: {
 					show: { operation: ['evaluate', 'evaluateAndExecute'] },
 				},
@@ -83,7 +83,7 @@ export class Guardian implements INodeType {
 				type: 'json',
 				default: '',
 				required: true,
-				description: 'The data your policy rules evaluate (e.g. { "amount": 5000 }). Use {{ $json.payload }} to pass the entire payload from the previous node, or {{ $json }} to pass all input data.',
+				description: 'The data your policy rules evaluate (e.g. { "amount": 5000 }). Use {{ $JSON.payload }} to pass the entire payload from the previous node, or {{ $JSON }} to pass all input data.',
 				displayOptions: {
 					show: { operation: ['evaluate', 'evaluateAndExecute'] },
 				},
@@ -93,9 +93,8 @@ export class Guardian implements INodeType {
 				name: 'requester',
 				type: 'string',
 				default: '',
-				required: false,
 				placeholder: '{{ $json.requester }} or my-workflow',
-				description: 'For audit trail. Use {{ $json.requester }} from input, or a fixed name like "finance-bot".',
+				description: 'For audit trail. Use {{ $JSON.requester }} from input, or a fixed name like "finance-bot".',
 				displayOptions: {
 					show: { operation: ['evaluate', 'evaluateAndExecute'] },
 				},
@@ -105,7 +104,6 @@ export class Guardian implements INodeType {
 				name: 'projectSlug',
 				type: 'string',
 				default: '',
-				required: false,
 				placeholder: 'e.g. finance, marketing',
 				description: 'Leave empty for default project. Set to scope policies to a specific Guardian project.',
 				displayOptions: {
@@ -117,9 +115,8 @@ export class Guardian implements INodeType {
 				name: 'idempotencyKey',
 				type: 'string',
 				default: '',
-				required: false,
 				placeholder: '{{ $json.orderId }}',
-				description: 'Prevents duplicate processing on retries. Use a unique ID from your data like {{ $json.orderId }} or {{ $json.transactionId }}.',
+				description: 'Prevents duplicate processing on retries. Use a unique ID from your data like {{ $JSON.orderId }} or {{ $JSON.transactionId }}.',
 				displayOptions: {
 					show: { operation: ['evaluate', 'evaluateAndExecute'] },
 				},
@@ -133,7 +130,7 @@ export class Guardian implements INodeType {
 				default: '',
 				required: true,
 				placeholder: 'e.g. {{$json["intentRunId"]}}',
-				description: 'The intentRunId returned by the Evaluate step.',
+				description: 'The intentRunId returned by the Evaluate step',
 				displayOptions: {
 					show: { operation: ['execute', 'checkStatus'] },
 				},
@@ -144,7 +141,6 @@ export class Guardian implements INodeType {
 				type: 'string',
 				typeOptions: { rows: 4 },
 				default: '',
-				required: false,
 				description: 'The same payload used in the Evaluate step. Required if payload hashing was enabled. Accepts a JSON string or an expression resolving to an object.',
 				displayOptions: {
 					show: { operation: ['execute'] },
@@ -172,6 +168,7 @@ export class Guardian implements INodeType {
 				],
 			},
 		],
+		usableAsTool: true,
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -215,6 +212,7 @@ export class Guardian implements INodeType {
 						path: '/v1/intents/check',
 						headers,
 						body,
+						node: this.getNode(),
 					});
 
 					const decision = String(evalResponse.decision ?? '').toUpperCase();
@@ -258,6 +256,7 @@ export class Guardian implements INodeType {
 							method: 'POST',
 							path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
 							body: { payload },
+							node: this.getNode(),
 						});
 
 						if (execResponse.idempotent === true) {
@@ -322,6 +321,7 @@ export class Guardian implements INodeType {
 						method: 'POST',
 						path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
 						body: { payload: executePayload },
+						node: this.getNode(),
 					});
 
 					if (execResponse.idempotent === true) {
@@ -362,6 +362,7 @@ export class Guardian implements INodeType {
 					const statusResponse = await guardianApiRequest(credentials, {
 						method: 'GET',
 						path: `/v1/intents/${encodeURIComponent(intentRunId)}`,
+						node: this.getNode(),
 					});
 
 					const decision = String(statusResponse.decision ?? '').toUpperCase();
@@ -390,10 +391,9 @@ export class Guardian implements INodeType {
 						pairedItem: { item: i },
 					});
 				} else {
-					if (error instanceof NodeOperationError) throw error;
 					throw new NodeOperationError(
 						this.getNode(),
-						error instanceof Error ? error.message : 'Guardian request failed',
+						error instanceof Error ? error : 'Guardian request failed',
 						{ itemIndex: i },
 					);
 				}

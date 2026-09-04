@@ -28,6 +28,7 @@ export class GuardianVerify implements INodeType {
 		icon: 'file:guardian.svg',
 		group: ['transform'],
 		version: 1,
+		subtitle: '={{$parameter["claimExecution"]}}',
 		description: 'Enforce a Guardian intent before executing a sensitive action',
 		defaults: {
 			name: 'Guardian Enforce',
@@ -72,7 +73,7 @@ export class GuardianVerify implements INodeType {
 				name: 'claimExecution',
 				type: 'options',
 				default: 'claim',
-				description: 'Guardian Enforce atomically authorizes this workflow as the only executor and blocks duplicate actions.',
+				description: 'Guardian Enforce atomically authorizes this workflow as the only executor and blocks duplicate actions',
 				options: [
 					{
 						name: 'Verify and Claim Once (Recommended)',
@@ -111,9 +112,10 @@ export class GuardianVerify implements INodeType {
 				name: 'testMode',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to include the test mode header when verifying.',
+				description: 'Whether to include the test mode header when verifying',
 			},
 		],
+		usableAsTool: true,
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -154,6 +156,7 @@ export class GuardianVerify implements INodeType {
 					method: 'GET',
 					path: `/v1/intents/${encodeURIComponent(intentRunId)}`,
 					headers,
+					node: this.getNode(),
 				});
 
 				const originalDecision = response.decision?.toUpperCase?.() || 'ERROR';
@@ -222,6 +225,7 @@ export class GuardianVerify implements INodeType {
 						path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
 						headers,
 						body: { payload: response.payloadJson },
+						node: this.getNode(),
 					});
 					const guardianMeta = outputItem.json._guardian as IDataObject;
 					guardianMeta.executionClaimed = executionResponse.executed === true && executionResponse.idempotent !== true;

@@ -45,6 +45,7 @@ async function guardianRequest(
 		method,
 		path,
 		body,
+		node: context.getNode(),
 	});
 }
 
@@ -59,6 +60,7 @@ export class GuardianApprovalTrigger implements INodeType {
 		icon: 'file:guardian.svg',
 		group: ['trigger'],
 		version: 1,
+		subtitle: '',
 		description: 'Automatically continue workflows when a Guardian approval is resolved',
 		defaults: {
 			name: 'Guardian Approval Trigger',
@@ -112,7 +114,6 @@ export class GuardianApprovalTrigger implements INodeType {
 				name: 'actionTypeFilter',
 				type: 'string',
 				default: '',
-				required: false,
 				placeholder: 'e.g. po_extraction.sheet_append',
 				description: 'Only trigger for approvals matching this action type. Leave blank to receive all approval events for this organization.',
 			},
@@ -164,8 +165,9 @@ export class GuardianApprovalTrigger implements INodeType {
 				if (staticData.webhookId && staticData.webhookUrl && staticData.webhookUrl !== webhookUrl) {
 					try {
 						await guardianRequest(this, 'DELETE', `/v1/admin/webhooks/${encodeURIComponent(staticData.webhookId)}`);
-					} catch {
-						// The stale registration may already have been removed.
+					} catch (error) {
+						// The stale registration may already have been removed — log and continue.
+						this.logger.error('Guardian Approval Trigger: failed to delete stale webhook registration', { error });
 					}
 				}
 
@@ -202,7 +204,7 @@ export class GuardianApprovalTrigger implements INodeType {
 							`${message} Deactivate the other workflow's Guardian Approval Trigger (or change this node's Action Type Filter), then activate again.`,
 						);
 					}
-					throw error;
+					throw new NodeOperationError(this.getNode(), error instanceof Error ? error : message);
 				}
 
 				if (!response.webhook?.id) return false;
@@ -217,7 +219,8 @@ export class GuardianApprovalTrigger implements INodeType {
 				if (staticData.webhookId) {
 					try {
 						await guardianRequest(this, 'DELETE', `/v1/admin/webhooks/${encodeURIComponent(staticData.webhookId)}`);
-					} catch {
+					} catch (error) {
+						this.logger.error('Guardian Approval Trigger: failed to delete webhook on deactivation', { error });
 						return false;
 					}
 				}

@@ -18,6 +18,7 @@ export const DEFAULT_GUARDIAN_BASE_URL = 'https://api.guardian-safety-gate.com';
 export class GuardianApi implements ICredentialType {
 	name = 'guardianApi';
 	displayName = 'Guardian API';
+	icon = 'file:guardian.svg' as const;
 	documentationUrl = 'https://guardiansafetygate.com/docs';
 	properties: INodeProperties[] = [
 		{

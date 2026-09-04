@@ -14,7 +14,8 @@
   "license": "MIT",
   "homepage": "https://guardiansafetygate.com",
   "author": {
-    "name": "Guardian Safety Gate"
+    "name": "Guardian Safety Gate",
+    "email": "support@guardiansafetygate.com"
   },
   "repository": {
     "type": "git",
@@ -23,9 +24,11 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc && npm run copy:assets",
-    "copy:assets": "node -e \"const fs=require('fs');for(const d of['Guardian','GuardianTool','GuardianVerify','GuardianApprovalTrigger','GuardianGate'])fs.cpSync('nodes/Guardian/guardian.svg','dist/nodes/'+d+'/guardian.svg',{recursive:true})\"",
+    "copy:assets": "node -e \"const fs=require('fs');for(const d of['Guardian','GuardianTool','GuardianVerify','GuardianApprovalTrigger','GuardianGate'])fs.cpSync('nodes/Guardian/guardian.svg','dist/nodes/'+d+'/guardian.svg',{recursive:true});fs.cpSync('nodes/Guardian/guardian.svg','dist/credentials/guardian.svg',{recursive:true})\"",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build",
+    "lint": "n8n-node lint",
+    "lint:fix": "n8n-node lint --fix",
     "release": "n8n-node release"
   },
   "files": [
@@ -53,7 +56,6 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@langchain/core": "*",
     "n8n-workflow": "*"
   }
 }

@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from 'crypto';
-import type { IDataObject } from 'n8n-workflow';
+import type { IDataObject, INode, JsonObject } from 'n8n-workflow';
+import { NodeApiError } from 'n8n-workflow';
 
 export interface GuardianApiCredentials {
 	baseUrl: string;
@@ -12,6 +13,7 @@ export interface GuardianApiRequestOptions {
 	path: string;
 	body?: unknown;
 	headers?: Record<string, string>;
+	node: INode;
 }
 
 export function buildGuardianRequestHeaders(
@@ -63,9 +65,8 @@ export async function guardianApiRequest<T = IDataObject>(
 		});
 	} catch (networkError) {
 		// DNS failure, connection refused, TLS error — the host is wrong or down.
-		throw new Error(
-			`Could not reach the Guardian API — check the Base URL on your credential (tried "${baseUrl}${options.path}": ${networkError instanceof Error ? networkError.message : String(networkError)})`,
-		);
+		const message = `Could not reach the Guardian API — check the Base URL on your credential (tried "${baseUrl}${options.path}": ${networkError instanceof Error ? networkError.message : String(networkError)})`;
+		throw new NodeApiError(options.node, { message } as JsonObject);
 	}
 	const responseText = await response.text();
 	let responseData: unknown = {};
@@ -80,21 +81,20 @@ export async function guardianApiRequest<T = IDataObject>(
 	}
 
 	if (!response.ok) {
-		const errorData = responseData as { error?: string; message?: string };
 		// Guardian always returns JSON errors. An HTML error page, a proxy/host
 		// error page, or any non-JSON body means the request hit something that
 		// isn't the Guardian API — almost always a wrong Base URL.
 		if (!parsedJson) {
-			throw new Error(
-				`Could not reach the Guardian API — check the Base URL on your credential (received a non-JSON HTTP ${response.status} response from "${baseUrl}${options.path}")`,
-			);
+			const message = `Could not reach the Guardian API — check the Base URL on your credential (received a non-JSON HTTP ${response.status} response from "${baseUrl}${options.path}")`;
+			throw new NodeApiError(options.node, { message } as JsonObject);
 		}
 		const errorDataWithDetails = responseData as { error?: string; message?: string; details?: Array<{ field: string; message: string }> };
 		const baseMessage = errorDataWithDetails.message || errorDataWithDetails.error || response.statusText;
 		const detailStr = errorDataWithDetails.details?.length
 			? ' (' + errorDataWithDetails.details.map(d => `${d.field}: ${d.message}`).join('; ') + ')'
 			: '';
-		throw new Error(`Guardian API request failed (${response.status}): ${baseMessage}${detailStr}`);
+		const message = `Guardian API request failed (${response.status}): ${baseMessage}${detailStr}`;
+		throw new NodeApiError(options.node, { message } as JsonObject);
 	}
 
 	return responseData as T;

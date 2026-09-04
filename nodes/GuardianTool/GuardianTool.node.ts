@@ -2,6 +2,7 @@ import { StructuredTool } from '@langchain/core/tools';
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
@@ -71,6 +72,7 @@ async function callGuardianApi(
 	idempotencyKey: string,
 	testMode: boolean,
 	mode: 'evaluate' | 'evaluateAndExecute',
+	node: INode,
 ): Promise<string> {
 	const payload: Record<string, unknown> = input.payload ? { ...input.payload } : {};
 	if (input.amount !== undefined) payload.amount = input.amount;
@@ -112,6 +114,7 @@ async function callGuardianApi(
 			path: '/v1/intents/check',
 			headers,
 			body,
+			node,
 		});
 		const decision = (result.decision || '').toUpperCase();
 
@@ -136,6 +139,7 @@ async function callGuardianApi(
 					method: 'POST',
 					path: `/v1/intents/${encodeURIComponent(result.intentRunId)}/execute`,
 					body: { payload },
+					node,
 				});
 				return JSON.stringify({
 					decision: 'ALLOW',
@@ -213,6 +217,7 @@ class GuardianSafetyTool extends StructuredTool<typeof toolInputSchema> {
 			this.idempotencyKey || randomString(16),
 			this.testMode,
 			this.mode,
+			this.ctx.getNode(),
 		);
 		try {
 			let parsed: IDataObject = {};
@@ -224,7 +229,7 @@ class GuardianSafetyTool extends StructuredTool<typeof toolInputSchema> {
 			await this.ctx.addOutputData(NodeConnectionTypes.AiTool, this.itemIndex, [[{ json: parsed }]]);
 		} catch (error) {
 			// Don't fail the tool if UI logging fails
-			console.error('Guardian tool: addOutputData failed', error);
+			this.ctx.logger.error('Guardian tool: addOutputData failed', { error });
 		}
 		return result;
 	}
@@ -259,6 +264,7 @@ export class GuardianTool implements INodeType {
 		icon: 'file:guardian.svg',
 		group: ['transform'],
 		version: 1,
+		subtitle: '={{$parameter["mode"]}}',
 		description: 'AI Agent tool to check actions against Guardian policies',
 		defaults: {
 			name: 'Guardian Agent Check',
@@ -340,7 +346,7 @@ export class GuardianTool implements INodeType {
 				name: 'testMode',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to run this intent in test mode (does not consume quota).',
+				description: 'Whether to run this intent in test mode (does not consume quota)',
 			},
 			{
 				displayName: 'Idempotency Key',
@@ -371,7 +377,7 @@ export class GuardianTool implements INodeType {
 			const testMode = this.getNodeParameter('testMode', i, false) as boolean;
 			const mode = this.getNodeParameter('mode', i, 'evaluate') as 'evaluate' | 'evaluateAndExecute';
 
-			const result = await callGuardianApi(input[i].json as unknown as GuardianInput, credentials, projectSlug, requester, idempotencyKey, testMode, mode);
+			const result = await callGuardianApi(input[i].json as unknown as GuardianInput, credentials, projectSlug, requester, idempotencyKey, testMode, mode, this.getNode());
 			response.push({
 				json: JSON.parse(result),
 				pairedItem: { item: i },

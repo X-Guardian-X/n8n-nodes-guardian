@@ -2,6 +2,7 @@ import { StructuredTool } from '@langchain/core/tools';
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
@@ -84,6 +85,7 @@ async function guardianGateCheck(
 	requester: string,
 	idempotencyKey: string,
 	testMode: boolean,
+	node: INode,
 ): Promise<string> {
 	const payload: Record<string, unknown> = input.payload ? { ...input.payload } : {};
 	if (input.amount !== undefined) payload.amount = input.amount;
@@ -127,6 +129,7 @@ async function guardianGateCheck(
 			path: '/v1/intents/check',
 			headers,
 			body,
+			node,
 		});
 
 		const decision = evalResult.decision?.toUpperCase() || 'ERROR';
@@ -145,6 +148,7 @@ async function guardianGateCheck(
 					path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
 					headers,
 					body: { payload },
+					node,
 				});
 
 				if (execResult.idempotent === true) {
@@ -274,6 +278,7 @@ class GuardianGateTool extends StructuredTool<typeof toolInputSchema> {
 			this.requester,
 			this.idempotencyKey || randomString(16),
 			this.testMode,
+			this.ctx.getNode(),
 		);
 		try {
 			let parsed: IDataObject = {};
@@ -284,7 +289,7 @@ class GuardianGateTool extends StructuredTool<typeof toolInputSchema> {
 			}
 			await this.ctx.addOutputData(NodeConnectionTypes.AiTool, this.itemIndex, [[{ json: parsed }]]);
 		} catch (error) {
-			console.error('Guardian Agent Check & Claim: addOutputData failed', error);
+			this.ctx.logger.error('Guardian Agent Check & Claim: addOutputData failed', { error });
 		}
 		return result;
 	}
@@ -320,6 +325,7 @@ export class GuardianGate implements INodeType {
 		icon: 'file:guardian.svg',
 		group: ['transform'],
 		version: 1,
+		subtitle: '',
 		description: 'All-in-one Guardian safety gate: evaluates policy, verifies intent, and atomically claims execution in a single call',
 		defaults: {
 			name: 'Guardian Agent Check & Claim',
@@ -384,7 +390,7 @@ export class GuardianGate implements INodeType {
 				name: 'testMode',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to run this intent in test mode (does not consume quota).',
+				description: 'Whether to run this intent in test mode (does not consume quota)',
 			},
 			{
 				displayName: 'Idempotency Key',
@@ -420,6 +426,7 @@ export class GuardianGate implements INodeType {
 				requester,
 				idempotencyKey,
 				testMode,
+				this.getNode(),
 			);
 			response.push({
 				json: JSON.parse(result),
