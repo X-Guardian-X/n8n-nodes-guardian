@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-guardian",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "n8n community nodes for Guardian Safety Gate — HMAC-signed policy enforcement, atomic execution claims, and automatic human approvals for AI workflows.",
   "keywords": [
     "n8n-community-node-package",
