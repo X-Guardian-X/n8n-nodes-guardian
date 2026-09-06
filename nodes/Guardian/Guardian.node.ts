@@ -140,7 +140,7 @@ export class Guardian implements INodeType {
 				name: 'executePayload',
 				type: 'json',
 				default: '',
-				description: 'The same payload used in the Evaluate step, required if payload hashing was enabled. Leave empty (recommended): the payload is taken automatically from the incoming item\'s payloadJson, as sent by the Guardian Approval Trigger. Only set this to override, and then use a JSON string such as {{ JSON.stringify($json.payloadJson) }} — a bare {{ $json.payloadJson }} is converted to text by n8n and will fail.',
+				description: 'The same payload used in the Evaluate step, required if payload hashing was enabled. Leave empty (recommended): the payload is taken automatically from the incoming item\'s payloadJson field, as sent by the Guardian Approval Trigger. Only set this to override, and then pass a stringified value, e.g. an expression wrapping JSON.stringify around the item\'s payloadJson field — passing that field directly is converted to text by n8n and will fail.',
 				displayOptions: {
 					show: { operation: ['execute'] },
 				},
