@@ -1,15 +1,12 @@
-import { StructuredTool } from '@langchain/core/tools';
 import type {
-	IDataObject,
 	IExecuteFunctions,
 	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
-	ISupplyDataFunctions,
-	SupplyData,
 } from 'n8n-workflow';
-import { NodeConnectionTypes, randomString } from 'n8n-workflow';
+import { createHash } from 'crypto';
+import { NodeConnectionTypes } from 'n8n-workflow';
 import { guardianApiRequest, type GuardianApiCredentials } from '../shared/guardianApiRequest';
 
 interface GuardianGateInput {
@@ -22,46 +19,6 @@ interface GuardianGateInput {
 	body?: string;
 	reason?: string;
 }
-
-const toolInputSchema = {
-	type: 'object' as const,
-	properties: {
-		actionType: {
-			type: 'string' as const,
-			description: 'The type of action to check. Examples: "email.send", "payment.send", "data.export", "user.delete"',
-		},
-		payload: {
-			type: 'object' as const,
-			description: 'Complete action payload. Include every exact action field (recipient, subject, body, amount, etc.). This same payload is used for integrity verification at execution time.',
-			additionalProperties: true,
-		},
-		amount: {
-			type: 'number' as const,
-			description: 'Payment amount if applicable, e.g. 500',
-		},
-		recipient: {
-			type: 'string' as const,
-			description: 'Recipient email or identifier, e.g. "vendor@example.com"',
-		},
-		recipientDomain: {
-			type: 'string' as const,
-			description: 'Normalized recipient domain including @, e.g. "@example.com"',
-		},
-		subject: {
-			type: 'string' as const,
-			description: 'Email subject if the action sends an email',
-		},
-		body: {
-			type: 'string' as const,
-			description: 'Complete email body if the action sends an email',
-		},
-		reason: {
-			type: 'string' as const,
-			description: 'Reason for the action',
-		},
-	},
-	required: ['actionType'],
-};
 
 interface GateResult {
 	decision: string;
@@ -78,15 +35,7 @@ interface GateResult {
 	message: string;
 }
 
-async function guardianGateCheck(
-	input: GuardianGateInput,
-	credentials: GuardianApiCredentials,
-	projectSlug: string,
-	requester: string,
-	idempotencyKey: string,
-	testMode: boolean,
-	node: INode,
-): Promise<string> {
+function normalizeGatePayload(input: GuardianGateInput): Record<string, unknown> {
 	const payload: Record<string, unknown> = input.payload ? { ...input.payload } : {};
 	if (input.amount !== undefined) payload.amount = input.amount;
 	const recipient = input.recipient || (typeof payload.recipient === 'string' ? payload.recipient : '');
@@ -102,6 +51,40 @@ async function guardianGateCheck(
 	if (input.subject) payload.subject = input.subject;
 	if (input.body) payload.body = input.body;
 	if (input.reason) payload.reason = input.reason;
+	return payload;
+}
+
+function buildExecutionScopedIdempotencyKey(
+	executionId: string,
+	actionType: string,
+	payload: Record<string, unknown>,
+): string {
+	const part = (value: unknown): string => {
+		if (value === undefined || value === null) return '';
+		return typeof value === 'string' ? value.trim().toLowerCase() : String(value);
+	};
+
+	const basis = [
+		part(actionType),
+		part(payload.recipient),
+		part(payload.subject),
+		part(payload.amount),
+	].join('|');
+
+	const digest = createHash('sha256').update(basis).digest('hex').slice(0, 16);
+	return `n8n-exec:${executionId}:${digest}`;
+}
+
+async function guardianGateCheck(
+	input: GuardianGateInput,
+	credentials: GuardianApiCredentials,
+	projectSlug: string,
+	requester: string,
+	idempotencyKey: string,
+	testMode: boolean,
+	node: INode,
+): Promise<string> {
+	const payload = normalizeGatePayload(input);
 
 	const body: Record<string, unknown> = {
 		actionType: input.actionType,
@@ -251,73 +234,6 @@ async function guardianGateCheck(
 	}
 }
 
-class GuardianGateTool extends StructuredTool<typeof toolInputSchema> {
-	name = 'guardian_gate';
-	description = '';
-	schema = toolInputSchema;
-
-	constructor(
-		private readonly credentials: GuardianApiCredentials,
-		private readonly projectSlug: string,
-		private readonly requester: string,
-		private readonly idempotencyKey: string,
-		private readonly testMode: boolean,
-		description: string,
-		private readonly ctx: ISupplyDataFunctions,
-		private readonly itemIndex: number,
-	) {
-		super();
-		this.description = description;
-	}
-
-	protected async _call(input: GuardianGateInput): Promise<string> {
-		const result = await guardianGateCheck(
-			input,
-			this.credentials,
-			this.projectSlug,
-			this.requester,
-			this.idempotencyKey || randomString(16),
-			this.testMode,
-			this.ctx.getNode(),
-		);
-		try {
-			let parsed: IDataObject = {};
-			try {
-				parsed = JSON.parse(result) as IDataObject;
-			} catch {
-				parsed = { response: result };
-			}
-			await this.ctx.addOutputData(NodeConnectionTypes.AiTool, this.itemIndex, [[{ json: parsed }]]);
-		} catch (error) {
-			this.ctx.logger.error('Guardian Agent Check & Claim: addOutputData failed', { error });
-		}
-		return result;
-	}
-}
-
-async function createGuardianGateTool(
-	ctx: ISupplyDataFunctions,
-	itemIndex: number,
-): Promise<GuardianGateTool> {
-	const credentials = await ctx.getCredentials('guardianApi') as unknown as GuardianApiCredentials;
-
-	const projectSlug = ctx.getNodeParameter('projectSlug', itemIndex, '') as string;
-	const requester = ctx.getNodeParameter('requester', itemIndex, 'n8n-ai-agent') as string;
-	const idempotencyKey = ctx.getNodeParameter('idempotencyKey', itemIndex, '') as string;
-	const testMode = ctx.getNodeParameter('testMode', itemIndex, false) as boolean;
-	const toolDescription = ctx.getNodeParameter('toolDescription', itemIndex,
-		'REQUIRED safety gate: Call this tool BEFORE performing any action. ' +
-		'Pass actionType and the complete payload (recipient, subject, body, amount, etc.). ' +
-		'The tool evaluates Guardian policy AND atomically claims execution if allowed — no separate verify step needed. ' +
-		'Returns JSON with: decision (ALLOW/DENY/REQUIRE_APPROVAL/ERROR), executed (true/false), intentRunId, actionType, payload, message. ' +
-		'If decision is ALLOW and executed is true, the action is authorized and claimed — proceed with it. ' +
-		'If DENY, do not proceed. If REQUIRE_APPROVAL, tell the user it is queued for approval. ' +
-		'In your final response, output ONLY a JSON object with: intentRunId, decision, actionType, recipient, subject, body, message.'
-	) as string;
-
-	return new GuardianGateTool(credentials, projectSlug, requester, idempotencyKey, testMode, toolDescription, ctx, itemIndex);
-}
-
 export class GuardianGate implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Guardian Agent Check & Claim',
@@ -361,6 +277,62 @@ export class GuardianGate implements INodeType {
 				default: '',
 			},
 			{
+				displayName: 'Action Type',
+				name: 'actionType',
+				type: 'string',
+				default: `={{ $fromAI('actionType', 'The type of action to check. Examples: "email.send", "payment.send", "data.export", "user.delete"', 'string') }}`,
+				description: 'The type of action to check. Examples: "email.send", "payment.send", "data.export", "user.delete".',
+			},
+			{
+				displayName: 'Payload',
+				name: 'payload',
+				type: 'json',
+				default: `={{ $fromAI('payload', 'Complete action payload. Include every exact action field (recipient, subject, body, amount, etc.). This same payload is used for integrity verification at execution time.', 'json') }}`,
+				description: 'Complete action payload. Include every exact action field (recipient, subject, body, amount, etc.). This same payload is used for integrity verification at execution time.',
+			},
+			{
+				displayName: 'Amount',
+				name: 'amount',
+				type: 'number',
+				default: 0,
+				description: 'Payment amount if applicable, e.g. 500',
+			},
+			{
+				displayName: 'Recipient',
+				name: 'recipient',
+				type: 'string',
+				default: `={{ $fromAI('recipient', 'Recipient email or identifier, e.g. "vendor@example.com"', 'string') }}`,
+				description: 'Recipient email or identifier, e.g. "vendor@example.com"',
+			},
+			{
+				displayName: 'Recipient Domain',
+				name: 'recipientDomain',
+				type: 'string',
+				default: `={{ $fromAI('recipientDomain', 'Normalized recipient domain including @, e.g. "@example.com"', 'string') }}`,
+				description: 'Normalized recipient domain including @, e.g. "@example.com"',
+			},
+			{
+				displayName: 'Subject',
+				name: 'subject',
+				type: 'string',
+				default: `={{ $fromAI('subject', 'Email subject if the action sends an email', 'string') }}`,
+				description: 'Email subject if the action sends an email',
+			},
+			{
+				displayName: 'Body',
+				name: 'body',
+				type: 'string',
+				default: `={{ $fromAI('body', 'Complete email body if the action sends an email', 'string') }}`,
+				description: 'Complete email body if the action sends an email',
+			},
+			{
+				displayName: 'Reason',
+				name: 'reason',
+				type: 'string',
+				default: `={{ $fromAI('reason', 'Reason for the action', 'string') }}`,
+				description: 'Reason for the action',
+			},
+			{
 				displayName: 'Tool Description',
 				name: 'toolDescription',
 				type: 'string',
@@ -398,29 +370,57 @@ export class GuardianGate implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'e.g. {{ $json.sessionId }}',
-				description: 'Optional. Prevents duplicate processing on retries. If empty, a random key is generated per call.',
+				description: 'Optional. Prevents duplicate intents. If empty, a deterministic key is derived from this workflow execution plus the action identity (actionType, recipient, subject, amount), so repeated tool calls for the same action within one execution collapse into a single intent.',
 			},
 		],
 	};
 
-	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
-		const tool = await createGuardianGateTool(this, itemIndex);
-		return { response: tool };
-	}
-
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const input = this.getInputData();
+		const items = this.getInputData();
 		const response: INodeExecutionData[] = [];
 
-		for (let i = 0; i < input.length; i++) {
+		for (let i = 0; i < items.length; i++) {
 			const credentials = await this.getCredentials('guardianApi') as unknown as GuardianApiCredentials;
 			const projectSlug = this.getNodeParameter('projectSlug', i, '') as string;
 			const requester = this.getNodeParameter('requester', i, 'n8n-ai-agent') as string;
-			const idempotencyKey = this.getNodeParameter('idempotencyKey', i, '') as string;
+			const idempotencyKeyParam = this.getNodeParameter('idempotencyKey', i, '') as string;
 			const testMode = this.getNodeParameter('testMode', i, false) as boolean;
 
+			const actionType = this.getNodeParameter('actionType', i, '') as string;
+			const payloadRaw = this.getNodeParameter('payload', i, {}) as unknown;
+			let payload: Record<string, unknown> = {};
+			if (typeof payloadRaw === 'string' && payloadRaw.trim()) {
+				try {
+					payload = JSON.parse(payloadRaw);
+				} catch {
+					payload = {};
+				}
+			} else if (payloadRaw && typeof payloadRaw === 'object') {
+				payload = payloadRaw as Record<string, unknown>;
+			}
+			const amountRaw = this.getNodeParameter('amount', i, undefined) as number | string | undefined;
+			const amount = amountRaw === undefined || amountRaw === '' ? undefined : Number(amountRaw);
+			const recipient = this.getNodeParameter('recipient', i, '') as string;
+			const recipientDomain = this.getNodeParameter('recipientDomain', i, '') as string;
+			const subject = this.getNodeParameter('subject', i, '') as string;
+			const body = this.getNodeParameter('body', i, '') as string;
+			const reason = this.getNodeParameter('reason', i, '') as string;
+
+			const guardianGateInput: GuardianGateInput = { actionType, payload, amount, recipient, recipientDomain, subject, body, reason };
+
+			// Deterministic execution-scoped idempotency: an AI agent that re-invokes this tool
+			// for the same action within one execution must reuse the existing intent instead of
+			// creating a duplicate. Volatile agent-authored text (reason, body) is excluded from
+			// the key so a reworded retry still deduplicates.
+			const idempotencyKey = idempotencyKeyParam
+				|| buildExecutionScopedIdempotencyKey(
+					this.getExecutionId(),
+					actionType,
+					normalizeGatePayload(guardianGateInput),
+				);
+
 			const result = await guardianGateCheck(
-				input[i].json as unknown as GuardianGateInput,
+				guardianGateInput,
 				credentials,
 				projectSlug,
 				requester,

@@ -138,10 +138,9 @@ export class Guardian implements INodeType {
 			{
 				displayName: 'Payload (for Integrity Check)',
 				name: 'executePayload',
-				type: 'string',
-				typeOptions: { rows: 4 },
+				type: 'json',
 				default: '',
-				description: 'The same payload used in the Evaluate step. Required if payload hashing was enabled. Accepts a JSON string or an expression resolving to an object.',
+				description: 'The same payload used in the Evaluate step, required if payload hashing was enabled. Leave empty (recommended): the payload is taken automatically from the incoming item\'s payloadJson, as sent by the Guardian Approval Trigger. Only set this to override, and then use a JSON string such as {{ JSON.stringify($json.payloadJson) }} — a bare {{ $json.payloadJson }} is converted to text by n8n and will fail.',
 				displayOptions: {
 					show: { operation: ['execute'] },
 				},
@@ -303,24 +302,45 @@ export class Guardian implements INodeType {
 				// ── EXECUTE (CONFIRM) ──────────────────────────────────────────────
 				else if (operation === 'execute') {
 					const intentRunId = this.getNodeParameter('intentRunId', i) as string;
-					const executePayloadRaw = this.getNodeParameter('executePayload', i, '{}') as string;
+					const executePayloadRaw = this.getNodeParameter('executePayload', i, '') as unknown;
 
-					let executePayload: Record<string, unknown> = {};
-					try {
-						executePayload = typeof executePayloadRaw === 'string'
-							? JSON.parse(executePayloadRaw)
-							: executePayloadRaw;
-					} catch {
-						if (typeof executePayloadRaw === 'string' && executePayloadRaw.includes('{{')) {
-							throw new NodeOperationError(this.getNode(), 'Payload field is set to Fixed, not Expression. Click the Expression toggle on this field.', { itemIndex: i });
+					// n8n coerces expression results to strings when resolving parameter
+					// values, so an object-valued expression such as
+					// `{{ $json.payloadJson }}` arrives here as the literal string
+					// "[object Object]" with the data irrecoverably lost. Detect that and
+					// read the payload straight off the input item instead, which is where
+					// the Guardian Approval Trigger puts it.
+					const isLostObject = typeof executePayloadRaw === 'string'
+						&& executePayloadRaw.trim().replace(/^=/, '') === '[object Object]';
+					const itemPayload = items[i]?.json?.payloadJson;
+
+					const execBody: Record<string, unknown> = {};
+					if (executePayloadRaw && typeof executePayloadRaw === 'object' && !Array.isArray(executePayloadRaw)) {
+						execBody.payload = executePayloadRaw;
+					} else if (!isLostObject && typeof executePayloadRaw === 'string' && executePayloadRaw.trim()) {
+						try {
+							execBody.payload = JSON.parse(executePayloadRaw);
+						} catch {
+							throw new NodeOperationError(
+								this.getNode(),
+								'Execute payload must be valid JSON. Leave this field empty to use the payload from the Guardian Approval Trigger automatically, or pass a JSON string such as {{ JSON.stringify($json.payloadJson) }}.',
+								{ itemIndex: i },
+							);
 						}
-						throw new NodeOperationError(this.getNode(), 'Execute payload must be valid JSON', { itemIndex: i });
+					} else if (itemPayload && typeof itemPayload === 'object' && !Array.isArray(itemPayload)) {
+						execBody.payload = itemPayload;
+					} else if (isLostObject) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'The payload expression resolved to "[object Object]" because n8n converts expression results to text. Leave the Payload field empty to use the approval payload from the input item automatically, or wrap it as {{ JSON.stringify($json.payloadJson) }}.',
+							{ itemIndex: i },
+						);
 					}
 
 					const execResponse = await guardianApiRequest(credentials, {
 						method: 'POST',
 						path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
-						body: { payload: executePayload },
+						body: execBody,
 						node: this.getNode(),
 					});
 

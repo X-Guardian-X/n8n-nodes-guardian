@@ -1,13 +1,9 @@
-import { StructuredTool } from '@langchain/core/tools';
 import type {
-	IDataObject,
 	IExecuteFunctions,
 	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
-	ISupplyDataFunctions,
-	SupplyData,
 } from 'n8n-workflow';
 import { NodeConnectionTypes, randomString } from 'n8n-workflow';
 import { guardianApiRequest, type GuardianApiCredentials } from '../shared/guardianApiRequest';
@@ -22,47 +18,6 @@ interface GuardianInput {
 	body?: string;
 	reason?: string;
 }
-
-// Raw JSON schema to avoid Zod -> JSON Schema conversion bugs in n8n
-const toolInputSchema = {
-	type: 'object' as const,
-	properties: {
-		actionType: {
-			type: 'string' as const,
-			description: 'The type of action to check. Examples: "payment.send", "data.export", "user.delete"',
-		},
-		payload: {
-			type: 'object' as const,
-			description: 'Complete action payload required to execute after approval. Include every exact action field.',
-			additionalProperties: true,
-		},
-		amount: {
-			type: 'number' as const,
-			description: 'Payment amount if applicable, e.g. 500',
-		},
-		recipient: {
-			type: 'string' as const,
-			description: 'Recipient email or identifier, e.g. "vendor@example.com"',
-		},
-		recipientDomain: {
-			type: 'string' as const,
-			description: 'Normalized recipient domain including @, e.g. "@example.com"',
-		},
-		subject: {
-			type: 'string' as const,
-			description: 'Email subject if the action sends an email',
-		},
-		body: {
-			type: 'string' as const,
-			description: 'Complete email body if the action sends an email',
-		},
-		reason: {
-			type: 'string' as const,
-			description: 'Reason for the action',
-		},
-	},
-	required: ['actionType'],
-};
 
 async function callGuardianApi(
 	input: GuardianInput,
@@ -188,75 +143,6 @@ async function callGuardianApi(
 	}
 }
 
-class GuardianSafetyTool extends StructuredTool<typeof toolInputSchema> {
-	name = 'guardian_safety_check';
-	description = '';
-	schema = toolInputSchema;
-
-	constructor(
-		private readonly credentials: GuardianApiCredentials,
-		private readonly projectSlug: string,
-		private readonly requester: string,
-		private readonly idempotencyKey: string,
-		private readonly testMode: boolean,
-		private readonly mode: 'evaluate' | 'evaluateAndExecute',
-		description: string,
-		private readonly ctx: ISupplyDataFunctions,
-		private readonly itemIndex: number,
-	) {
-		super();
-		this.description = description;
-	}
-
-	protected async _call(input: GuardianInput): Promise<string> {
-		const result = await callGuardianApi(
-			input,
-			this.credentials,
-			this.projectSlug,
-			this.requester,
-			this.idempotencyKey || randomString(16),
-			this.testMode,
-			this.mode,
-			this.ctx.getNode(),
-		);
-		try {
-			let parsed: IDataObject = {};
-			try {
-				parsed = JSON.parse(result) as IDataObject;
-			} catch {
-				parsed = { response: result };
-			}
-			await this.ctx.addOutputData(NodeConnectionTypes.AiTool, this.itemIndex, [[{ json: parsed }]]);
-		} catch (error) {
-			// Don't fail the tool if UI logging fails
-			this.ctx.logger.error('Guardian tool: addOutputData failed', { error });
-		}
-		return result;
-	}
-}
-
-async function createGuardianTool(
-	ctx: ISupplyDataFunctions,
-	itemIndex: number,
-): Promise<GuardianSafetyTool> {
-	const credentials = await ctx.getCredentials('guardianApi') as unknown as GuardianApiCredentials;
-
-	const projectSlug = ctx.getNodeParameter('projectSlug', itemIndex, '') as string;
-	const requester = ctx.getNodeParameter('requester', itemIndex, 'n8n-ai-agent') as string;
-	const idempotencyKey = ctx.getNodeParameter('idempotencyKey', itemIndex, '') as string;
-	const testMode = ctx.getNodeParameter('testMode', itemIndex, false) as boolean;
-	const mode = ctx.getNodeParameter('mode', itemIndex, 'evaluate') as 'evaluate' | 'evaluateAndExecute';
-	const toolDescription = ctx.getNodeParameter('toolDescription', itemIndex,
-		'REQUIRED safety gate: Check if an action is allowed by Guardian policy before executing it. ' +
-		'You MUST call this tool before confirming any payment, transfer, data export, user deletion, or sensitive action. ' +
-		'This is the only path that can authorize an action. Pass actionType and the complete exact action payload required for later execution. ' +
-		'For email.send include recipient, subject, and body. Guardian derives recipientDomain from recipient for domain policies. Returns JSON containing decision, intentRunId, actionType, and payload. ' +
-		'Copy the returned intentRunId, decision, and actionType exactly into your final structured JSON response.'
-	) as string;
-
-	return new GuardianSafetyTool(credentials, projectSlug, requester, idempotencyKey, testMode, mode, toolDescription, ctx, itemIndex);
-}
-
 export class GuardianTool implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Guardian Agent Check',
@@ -298,6 +184,62 @@ export class GuardianTool implements INodeType {
 				name: 'notice',
 				type: 'notice',
 				default: '',
+			},
+			{
+				displayName: 'Action Type',
+				name: 'actionType',
+				type: 'string',
+				default: `={{ $fromAI('actionType', 'The type of action to check. Examples: "payment.send", "data.export", "user.delete"', 'string') }}`,
+				description: 'The type of action to check. Examples: "payment.send", "data.export", "user.delete".',
+			},
+			{
+				displayName: 'Payload',
+				name: 'payload',
+				type: 'json',
+				default: `={{ $fromAI('payload', 'Complete action payload required to execute after approval. Include every exact action field.', 'json') }}`,
+				description: 'Complete action payload required to execute after approval. Include every exact action field.',
+			},
+			{
+				displayName: 'Amount',
+				name: 'amount',
+				type: 'number',
+				default: 0,
+				description: 'Payment amount if applicable, e.g. 500',
+			},
+			{
+				displayName: 'Recipient',
+				name: 'recipient',
+				type: 'string',
+				default: `={{ $fromAI('recipient', 'Recipient email or identifier, e.g. "vendor@example.com"', 'string') }}`,
+				description: 'Recipient email or identifier, e.g. "vendor@example.com"',
+			},
+			{
+				displayName: 'Recipient Domain',
+				name: 'recipientDomain',
+				type: 'string',
+				default: `={{ $fromAI('recipientDomain', 'Normalized recipient domain including @, e.g. "@example.com"', 'string') }}`,
+				description: 'Normalized recipient domain including @, e.g. "@example.com"',
+			},
+			{
+				displayName: 'Subject',
+				name: 'subject',
+				type: 'string',
+				default: `={{ $fromAI('subject', 'Email subject if the action sends an email', 'string') }}`,
+				description: 'Email subject if the action sends an email',
+			},
+			{
+				displayName: 'Body',
+				name: 'body',
+				type: 'string',
+				default: `={{ $fromAI('body', 'Complete email body if the action sends an email', 'string') }}`,
+				description: 'Complete email body if the action sends an email',
+			},
+			{
+				displayName: 'Reason',
+				name: 'reason',
+				type: 'string',
+				default: `={{ $fromAI('reason', 'Reason for the action', 'string') }}`,
+				description: 'Reason for the action',
 			},
 			{
 				displayName: 'Tool Description',
@@ -359,25 +301,43 @@ export class GuardianTool implements INodeType {
 		],
 	};
 
-	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
-		const tool = await createGuardianTool(this, itemIndex);
-		return { response: tool };
-	}
-
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const input = this.getInputData();
+		const items = this.getInputData();
 		const response: INodeExecutionData[] = [];
 
-		for (let i = 0; i < input.length; i++) {
+		for (let i = 0; i < items.length; i++) {
 			const credentials = await this.getCredentials('guardianApi') as unknown as GuardianApiCredentials;
 			const projectSlug = this.getNodeParameter('projectSlug', i, '') as string;
 			const requester = this.getNodeParameter('requester', i, 'n8n-ai-agent') as string;
 
-			const idempotencyKey = this.getNodeParameter('idempotencyKey', i, '') as string;
+			const idempotencyKeyParam = this.getNodeParameter('idempotencyKey', i, '') as string;
+			const idempotencyKey = idempotencyKeyParam || randomString(16);
 			const testMode = this.getNodeParameter('testMode', i, false) as boolean;
 			const mode = this.getNodeParameter('mode', i, 'evaluate') as 'evaluate' | 'evaluateAndExecute';
 
-			const result = await callGuardianApi(input[i].json as unknown as GuardianInput, credentials, projectSlug, requester, idempotencyKey, testMode, mode, this.getNode());
+			const actionType = this.getNodeParameter('actionType', i, '') as string;
+			const payloadRaw = this.getNodeParameter('payload', i, {}) as unknown;
+			let payload: Record<string, unknown> = {};
+			if (typeof payloadRaw === 'string' && payloadRaw.trim()) {
+				try {
+					payload = JSON.parse(payloadRaw);
+				} catch {
+					payload = {};
+				}
+			} else if (payloadRaw && typeof payloadRaw === 'object') {
+				payload = payloadRaw as Record<string, unknown>;
+			}
+			const amountRaw = this.getNodeParameter('amount', i, undefined) as number | string | undefined;
+			const amount = amountRaw === undefined || amountRaw === '' ? undefined : Number(amountRaw);
+			const recipient = this.getNodeParameter('recipient', i, '') as string;
+			const recipientDomain = this.getNodeParameter('recipientDomain', i, '') as string;
+			const subject = this.getNodeParameter('subject', i, '') as string;
+			const body = this.getNodeParameter('body', i, '') as string;
+			const reason = this.getNodeParameter('reason', i, '') as string;
+
+			const guardianInput: GuardianInput = { actionType, payload, amount, recipient, recipientDomain, subject, body, reason };
+
+			const result = await callGuardianApi(guardianInput, credentials, projectSlug, requester, idempotencyKey, testMode, mode, this.getNode());
 			response.push({
 				json: JSON.parse(result),
 				pairedItem: { item: i },
