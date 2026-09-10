@@ -57,7 +57,7 @@ export class GuardianApprovalTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Guardian Approval Trigger',
 		name: 'guardianApprovalTrigger',
-		icon: 'file:guardian.svg',
+		icon: { light: 'file:guardian.svg', dark: 'file:guardian.dark.svg' },
 		group: ['trigger'],
 		version: 1,
 		subtitle: '',

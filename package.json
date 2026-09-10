@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-guardian",
-  "version": "0.7.8",
+  "version": "1.0.1",
   "description": "n8n community nodes for Guardian Safety Gate — HMAC-signed policy enforcement, atomic execution claims, and automatic human approvals for AI workflows.",
   "keywords": [
     "n8n-community-node-package",
@@ -24,7 +24,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc && npm run copy:assets",
-    "copy:assets": "node -e \"const fs=require('fs');for(const d of['Guardian','GuardianTool','GuardianVerify','GuardianApprovalTrigger','GuardianGate'])fs.cpSync('nodes/Guardian/guardian.svg','dist/nodes/'+d+'/guardian.svg',{recursive:true});fs.cpSync('nodes/Guardian/guardian.svg','dist/credentials/guardian.svg',{recursive:true})\"",
+    "copy:assets": "node -e \"const fs=require('fs');for(const f of['guardian.svg','guardian.dark.svg']){for(const d of['Guardian','GuardianApprovalTrigger'])fs.cpSync('nodes/Guardian/'+f,'dist/nodes/'+d+'/'+f,{recursive:true});fs.cpSync('nodes/Guardian/'+f,'dist/credentials/'+f,{recursive:true})}\"",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build",
     "lint": "n8n-node lint",
@@ -42,10 +42,7 @@
     ],
     "nodes": [
       "dist/nodes/Guardian/Guardian.node.js",
-      "dist/nodes/GuardianTool/GuardianTool.node.js",
-      "dist/nodes/GuardianVerify/GuardianVerify.node.js",
-      "dist/nodes/GuardianApprovalTrigger/GuardianApprovalTrigger.node.js",
-      "dist/nodes/GuardianGate/GuardianGate.node.js"
+      "dist/nodes/GuardianApprovalTrigger/GuardianApprovalTrigger.node.js"
     ]
   },
   "devDependencies": {

@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Start here\n1. Install **n8n-nodes-guardian 0.4.1**.\n2. Add OpenAI, SMTP, and Guardian credentials.\n3. For a signed Guardian key, paste both the `gk_` API key and one-time `gs_` signing secret.\n4. Set your sender address in **Send Verified Email**.\n5. Activate this workflow. The approval webhook registers automatically.\n\nYou do not create or copy a Guardian webhook manually.",
+        "content": "## Start here\n1. Install **n8n-nodes-guardian 1.0.0**.\n2. Add OpenAI, SMTP, and Guardian credentials.\n3. For a signed Guardian key, paste both the `gk_` API key and one-time `gs_` signing secret.\n4. Set your sender address in **Send Verified Email**.\n5. Activate this workflow. The approval webhook registers automatically.\n\nYou do not create or copy a Guardian webhook manually.",
         "height": 300,
         "width": 430,
         "color": 5
@@ -108,13 +108,14 @@
     },
     {
       "parameters": {
-        "mode": "evaluate",
-        "toolDescription": "Mandatory authorization boundary for email. Call exactly once before returning ready=true. Use actionType email.send and provide the complete exact recipient, subject, and body. The tool creates a server-side intent and returns decision, intentRunId, actionType, and payload. Copy those values exactly. Never invent authorization.",
-        "requester": "n8n-email-autopilot"
+        "resource": "agentGate",
+        "agentGateOperation": "evaluate",
+        "agentToolDescription": "Mandatory authorization boundary for email. Call exactly once before returning ready=true. Use actionType email.send and provide the complete exact recipient, subject, and body. The tool creates a server-side intent and returns decision, intentRunId, actionType, and payload. Copy those values exactly. Never invent authorization.",
+        "agentRequester": "n8n-email-autopilot"
       },
       "id": "guardian-tool",
       "name": "Guardian Safety Check",
-      "type": "n8n-nodes-guardian.guardianTool",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [160, 170],
       "credentials": { "guardianApi": { "id": "REPLACE_GUARDIAN_CREDENTIAL", "name": "Guardian API" } }
@@ -167,16 +168,17 @@
     },
     {
       "parameters": {
-        "intentRunId": "={{ $json.intentRunId }}",
-        "claimExecution": "claim",
+        "resource": "enforce",
+        "enforceIntentRunId": "={{ $json.intentRunId }}",
+        "enforceOperation": "claim",
         "expectedActionType": "={{ $json.actionType }}",
         "expectedProjectSlug": "",
         "expectedIdempotencyKey": "",
-        "testMode": false
+        "enforceTestMode": false
       },
       "id": "guardian-verify",
       "name": "Verify and Claim Exact Intent",
-      "type": "n8n-nodes-guardian.guardianVerify",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [520, -180],
       "credentials": { "guardianApi": { "id": "REPLACE_GUARDIAN_CREDENTIAL", "name": "Guardian API" } }
@@ -229,17 +231,6 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [800, 20]
-    },
-    {
-      "parameters": {
-        "assignments": { "assignments": [{ "id": "error-message", "name": "chatOutput", "value": "=⚠️ Guardian verification failed closed. No email was sent. {{ $json.error || '' }}", "type": "string" }] },
-        "options": {}
-      },
-      "id": "error-response",
-      "name": "Fail Closed",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [800, 180]
     }
   ],
   "connections": {
@@ -252,7 +243,7 @@
     "Fail-Closed Output Validation": { "main": [[{ "node": "Ready for Hard Gate?", "type": "main", "index": 0 }]] },
     "Ready for Hard Gate?": { "main": [[{ "node": "Verify and Claim Exact Intent", "type": "main", "index": 0 }], [{ "node": "Ask for Missing Details", "type": "main", "index": 0 }]] },
     "Guardian Approval Resolved": { "main": [[{ "node": "Verify and Claim Exact Intent", "type": "main", "index": 0 }]] },
-    "Verify and Claim Exact Intent": { "main": [[{ "node": "Send Verified Email", "type": "main", "index": 0 }], [{ "node": "Policy Denied", "type": "main", "index": 0 }], [{ "node": "Approval Queued", "type": "main", "index": 0 }], [{ "node": "Fail Closed", "type": "main", "index": 0 }]] },
+    "Verify and Claim Exact Intent": { "main": [[{ "node": "Send Verified Email", "type": "main", "index": 0 }], [{ "node": "Policy Denied", "type": "main", "index": 0 }], [{ "node": "Approval Queued", "type": "main", "index": 0 }]] },
     "Send Verified Email": { "main": [[{ "node": "Verified Send Complete", "type": "main", "index": 0 }]] }
   },
   "pinData": {},

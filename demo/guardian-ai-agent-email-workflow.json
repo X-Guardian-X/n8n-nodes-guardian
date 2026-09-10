@@ -45,13 +45,14 @@
     },
     {
       "parameters": {
-        "mode": "evaluate",
-        "toolDescription": "REQUIRED safety gate: Check if an email is allowed by Guardian policy before sending it. You MUST call this tool before confirming any email, especially to external recipients or when the content is sensitive. Pass actionType (required), recipient (optional), subject (optional), bodyPreview (optional). Returns a decision (ALLOW, DENY, REQUIRE_APPROVAL), an intentRunId, and actionType. CRITICAL: In your final response you MUST output ONLY a single JSON object with fields: intentRunId, decision, actionType, recipient, subject, body, message. Do not add markdown fences or extra text outside the JSON.",
-        "requester": "n8n-email-agent"
+        "resource": "agentGate",
+        "agentGateOperation": "evaluate",
+        "agentToolDescription": "REQUIRED safety gate: Check if an email is allowed by Guardian policy before sending it. You MUST call this tool before confirming any email, especially to external recipients or when the content is sensitive. Pass actionType (required), recipient (optional), subject (optional), bodyPreview (optional). Returns a decision (ALLOW, DENY, REQUIRE_APPROVAL), an intentRunId, and actionType. CRITICAL: In your final response you MUST output ONLY a single JSON object with fields: intentRunId, decision, actionType, recipient, subject, body, message. Do not add markdown fences or extra text outside the JSON.",
+        "agentRequester": "n8n-email-agent"
       },
       "id": "guardian-tool",
       "name": "Guardian Safety",
-      "type": "n8n-nodes-guardian.guardianTool",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [440, 260],
       "credentials": {
@@ -73,12 +74,13 @@
     },
     {
       "parameters": {
-        "intentRunId": "={{ $json.intentRunId }}",
+        "resource": "enforce",
+        "enforceIntentRunId": "={{ $json.intentRunId }}",
         "expectedActionType": "={{ $json.actionType }}"
       },
       "id": "guardian-verify",
       "name": "Guardian Verify",
-      "type": "n8n-nodes-guardian.guardianVerify",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [660, 0],
       "credentials": {
@@ -116,7 +118,7 @@
             {
               "id": "deny-msg",
               "name": "chatOutput",
-              "value": "=❌ {{ $json.message || 'This email was blocked by Guardian policy.' }}",
+              "value": "=❌ {{ $json.message || $json.error || 'This email was blocked by Guardian policy.' }}",
               "type": "string"
             }
           ]
@@ -144,26 +146,6 @@
       "typeVersion": 1.1,
       "position": [860, 140],
       "webhookId": "guardian-email-approval-wait"
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "error-msg",
-              "name": "chatOutput",
-              "value": "=⚠️ {{ $json.parseError || 'Could not verify this email with Guardian. No email was sent.' }}",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "error-response",
-      "name": "Error Response",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [860, 280]
     },
     {
       "parameters": {
@@ -261,13 +243,6 @@
         [
           {
             "node": "Wait for Approval",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Error Response",
             "type": "main",
             "index": 0
           }

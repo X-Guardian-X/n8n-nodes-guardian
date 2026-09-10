@@ -45,12 +45,14 @@
     },
     {
       "parameters": {
-        "toolDescription": "Check if an action is allowed by company policy before executing it. You MUST call this tool before confirming any payment, transfer, or sensitive action. Pass actionType (required), amount (optional), recipient (optional). Returns ALLOW (safe to proceed), DENY (blocked by policy), or REQUIRE_APPROVAL (needs human approval).",
-        "requester": "n8n-ai-agent"
+        "resource": "agentGate",
+        "agentGateOperation": "evaluate",
+        "agentToolDescription": "Check if an action is allowed by company policy before executing it. You MUST call this tool before confirming any payment, transfer, or sensitive action. Pass actionType (required), amount (optional), recipient (optional). Returns ALLOW (safe to proceed), DENY (blocked by policy), or REQUIRE_APPROVAL (needs human approval).",
+        "agentRequester": "n8n-ai-agent"
       },
       "id": "guardian-tool",
       "name": "Guardian Safety",
-      "type": "n8n-nodes-guardian.guardianTool",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [440, 260],
       "credentials": {

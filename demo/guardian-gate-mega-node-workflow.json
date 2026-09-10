@@ -20,11 +20,13 @@
     },
     {
       "parameters": {
-        "requester": "n8n-email-agent"
+        "resource": "agentGate",
+        "agentGateOperation": "evaluateAndClaim",
+        "agentRequester": "n8n-email-agent"
       },
       "id": "c68d3850-6e5e-4738-ab7c-781be20e3535",
       "name": "Guardian Gate",
-      "type": "n8n-nodes-guardian.guardianGate",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [
         -480,

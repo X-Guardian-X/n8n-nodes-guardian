@@ -45,13 +45,14 @@
     },
     {
       "parameters": {
-        "mode": "evaluate",
-        "toolDescription": "REQUIRED safety gate: Check if an action is allowed by Guardian policy before executing it. You MUST call this tool before confirming any payment, transfer, data export, user deletion, or sensitive action. Pass actionType (required), amount (optional), recipient (optional), reason (optional). Returns a decision (ALLOW, DENY, REQUIRE_APPROVAL), an intentRunId, and actionType. CRITICAL: In your final response you MUST include the intentRunId and decision using this exact format so the workflow can verify it with Guardian:\nINTENT_RUN_ID: <intentRunId>\nDECISION: <ALLOW|DENY|REQUIRE_APPROVAL>\nACTION_TYPE: <actionType>",
-        "requester": "n8n-ai-agent"
+        "resource": "agentGate",
+        "agentGateOperation": "evaluate",
+        "agentToolDescription": "REQUIRED safety gate: Check if an action is allowed by Guardian policy before executing it. You MUST call this tool before confirming any payment, transfer, data export, user deletion, or sensitive action. Pass actionType (required), amount (optional), recipient (optional), reason (optional). Returns a decision (ALLOW, DENY, REQUIRE_APPROVAL), an intentRunId, and actionType. CRITICAL: In your final response you MUST include the intentRunId and decision using this exact format so the workflow can verify it with Guardian:\nINTENT_RUN_ID: <intentRunId>\nDECISION: <ALLOW|DENY|REQUIRE_APPROVAL>\nACTION_TYPE: <actionType>",
+        "agentRequester": "n8n-ai-agent"
       },
       "id": "guardian-tool",
       "name": "Guardian Safety",
-      "type": "n8n-nodes-guardian.guardianTool",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [440, 260],
       "credentials": {
@@ -73,12 +74,13 @@
     },
     {
       "parameters": {
-        "intentRunId": "={{ $json.intentRunId }}",
+        "resource": "enforce",
+        "enforceIntentRunId": "={{ $json.intentRunId }}",
         "expectedActionType": "={{ $json.actionType }}"
       },
       "id": "guardian-verify",
       "name": "Guardian Verify",
-      "type": "n8n-nodes-guardian.guardianVerify",
+      "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,
       "position": [660, 0],
       "credentials": {
@@ -120,7 +122,7 @@
             {
               "id": "deny-msg",
               "name": "chatOutput",
-              "value": "=❌ Action blocked: {{ $json.decisionReason || 'Policy violation' }}",
+              "value": "=❌ Action blocked: {{ $json.decisionReason || $json.error || 'Policy violation' }}",
               "type": "string"
             }
           ]
@@ -148,26 +150,6 @@
       "typeVersion": 1.1,
       "position": [860, 140],
       "webhookId": "guardian-approval-wait"
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "error-msg",
-              "name": "chatOutput",
-              "value": "=⚠️ Could not verify this action with Guardian. No action was taken.",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "error-response",
-      "name": "Error Response",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [860, 280]
     },
     {
       "parameters": {
@@ -265,13 +247,6 @@
         [
           {
             "node": "Wait for Approval",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Error Response",
             "type": "main",
             "index": 0
           }
