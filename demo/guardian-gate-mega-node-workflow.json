@@ -322,9 +322,10 @@
     },
     {
       "parameters": {
-        "operation": "execute",
-        "intentRunId": "={{ $json.intentRunId }}",
-        "executePayload": "={\n  \"recipient\": \"{{ $json.payloadJson.recipient }}\",\n  \"subject\": \"{{ $json.payloadJson.subject }}\",\n  \"body\": \"{{ $json.payloadJson.body }}\",\n  \"recipientDomain\": \"{{ $json.payloadJson.recipientDomain }}\"\n}"
+        "resource": "enforce",
+        "enforceIntentRunId": "={{ $json.intentRunId }}",
+        "enforceOperation": "claim",
+        "expectedActionType": "={{ $json.actionType }}"
       },
       "type": "n8n-nodes-guardian.guardian",
       "typeVersion": 1,

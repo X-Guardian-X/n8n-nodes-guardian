@@ -100,7 +100,7 @@ export class Guardian implements INodeType {
 		icon: { light: 'file:guardian.svg', dark: 'file:guardian.dark.svg' },
 		group: ['transform'],
 		version: 1,
-		subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
+		subtitle: '={{$parameter["resource"] === "check" ? $parameter["resource"] + ": " + $parameter["operation"] : $parameter["resource"] === "enforce" ? $parameter["resource"] + ": " + $parameter["enforceOperation"] : $parameter["resource"] + ": " + $parameter["agentGateOperation"]}}',
 		description: 'Policy-based safety gate for AI agents and workflows. Check actions against Guardian policies, enforce previously-evaluated intents, or gate AI agent tool calls. Returns Allowed (including OBSERVED advisory decisions), Denied, or Needs Approval.',
 		defaults: {
 			name: 'Guardian',
@@ -348,6 +348,8 @@ export class Guardian implements INodeType {
 				name: 'enforceIntentRunId',
 				type: 'string',
 				default: '',
+				required: true,
+				placeholder: 'e.g. {{ $json.intentRunId }}',
 				description: 'The intentRunId returned by Guardian Agent Gate. Enforce will check its real status with Guardian.',
 				displayOptions: { show: { resource: ['enforce'] } },
 			},
