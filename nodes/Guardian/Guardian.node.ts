@@ -935,7 +935,11 @@ export class Guardian implements INodeType {
 						// here would halt the whole workflow; instead return a graceful ERROR
 						// JSON so the agent can decide how to proceed (matches the original
 						// GuardianTool/GuardianGate behavior).
-						deniedItems.push({
+						// NOTE: always pushed to allowedItems (output 0) — when this node is
+						// used as an AI tool, n8n's tool wrapper only reads the first output,
+						// so DENY/REQUIRE_APPROVAL/ERROR results must also land there or the
+						// agent sees an empty response and loops forever.
+						allowedItems.push({
 							json: {
 								decision: 'ERROR',
 								canProceed: false,
@@ -972,7 +976,7 @@ export class Guardian implements INodeType {
 					}
 
 					if (decision === 'DENY') {
-						deniedItems.push({
+						allowedItems.push({
 							json: {
 								decision: 'DENY',
 								canProceed: false,
@@ -989,7 +993,7 @@ export class Guardian implements INodeType {
 
 					if (decision !== 'ALLOW') {
 						// REQUIRE_APPROVAL
-						approvalItems.push({
+						allowedItems.push({
 							json: {
 								decision: 'REQUIRE_APPROVAL',
 								canProceed: false,
@@ -1037,7 +1041,7 @@ export class Guardian implements INodeType {
 						});
 
 						if (execResult.idempotent === true) {
-							deniedItems.push({
+							allowedItems.push({
 								json: {
 									decision: 'ALLOW',
 									canProceed: false,
@@ -1067,7 +1071,7 @@ export class Guardian implements INodeType {
 							pairedItem: { item: i },
 						});
 					} catch (execError) {
-						deniedItems.push({
+						allowedItems.push({
 							json: {
 								decision: 'ERROR',
 								canProceed: false,
