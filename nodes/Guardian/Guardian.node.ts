@@ -107,10 +107,6 @@ export class Guardian implements INodeType {
 		},
 		codex: {
 			categories: ['AI'],
-			subcategories: {
-				AI: ['Tools'],
-				Tools: ['Other Tools'],
-			},
 			resources: {
 				primaryDocumentation: [
 					{
