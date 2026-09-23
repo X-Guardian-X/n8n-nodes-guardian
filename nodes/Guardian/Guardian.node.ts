@@ -106,7 +106,15 @@ export class Guardian implements INodeType {
 			name: 'Guardian',
 		},
 		codex: {
-			categories: ['AI'],
+			// 'AI' is NOT a valid category string — the nodes panel special-cases it
+			// and the node silently never appears in search (n8n-io/n8n#24630).
+			// Core Nodes/Helpers matches GuardianApprovalTrigger — proven to index,
+			// and keeps both Guardian nodes grouped together in the panel.
+			categories: ['Core Nodes'],
+			subcategories: {
+				'Core Nodes': ['Helpers'],
+			},
+			alias: ['Policy', 'Safety', 'Approval', 'AI Safety', 'Guard', 'Compliance', 'Gate', 'Governance', 'Audit'],
 			resources: {
 				primaryDocumentation: [
 					{
