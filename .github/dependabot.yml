@@ -1,0 +1,22 @@
+# Dependabot — this package moved out of the GUARDIAN_V1 monorepo's
+# dependabot coverage when the directory became its own repository.
+# Same policy: weekly grouped minor/patch PRs; security updates are always
+# immediate regardless of schedule.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-patch:
+        update-types: [minor, patch]
+
+  # Keep the CI/publish workflows themselves up to date (actions/* versions)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

@@ -1,0 +1,54 @@
+# CI — lint, build, contract test, and supply-chain audit.
+#
+# This package is published from this repository (see publish.yml); it is not
+# covered by the GUARDIAN_V1 monorepo's security-audit workflow. The audit
+# flags below mirror what that workflow used to run for this package:
+#  - `npm ci --omit=dev` + `npm audit --audit-level=high --omit=dev`:
+#    dev-tooling advisories (the @n8n/node-cli tree carries known moderates)
+#    never ship to production, so the gate stays on prod deps, high/critical.
+#  - `npm ci --ignore-scripts`: n8n-workflow transitively pulls isolated-vm,
+#    a native module that fails to compile on CI runners; tsc/eslint only
+#    need its .d.ts files.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Weekly catch-up so newly-disclosed CVEs in pinned deps get flagged even
+  # when no code changed.
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Deterministic install (prod deps only)
+        run: npm ci --omit=dev
+      - name: Audit (fail on high/critical)
+        run: npm audit --audit-level=high --omit=dev
+
+  build:
+    name: lint, build & contract test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Deterministic install
+        run: npm ci --ignore-scripts
+      - name: Lint
+        run: npm run lint
+      - name: Contract test (builds dist first via pretest)
+        run: npm test

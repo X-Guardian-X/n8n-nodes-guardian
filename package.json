@@ -29,10 +29,13 @@
     "prepublishOnly": "npm run build",
     "lint": "n8n-node lint",
     "lint:fix": "n8n-node lint --fix",
-    "release": "n8n-node release"
+    "release": "n8n-node release",
+    "pretest": "npm run build",
+    "test": "node test/webhook-contract.test.mjs"
   },
   "files": [
     "dist",
+    "contracts",
     "demo/guardian-email-autopilot-workflow.json"
   ],
   "n8n": {

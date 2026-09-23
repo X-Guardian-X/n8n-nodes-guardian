@@ -1,0 +1,34 @@
+{
+  "$id": "https://github.com/X-Guardian-X/n8n-nodes-guardian/blob/main/contracts/notification-webhook.json",
+  "description": "Canonical contract between Guardian's NotificationWebhook API (backend, GUARDIAN_V1 repo) and the GuardianApprovalTrigger node (this package). Both sides assert against this document: the node repo's test/webhook-contract.test.mjs verifies the trigger's behavior mechanically; the backend repo asserts the API surface it owns (route, schema, migrations) and references this file as the shared definition. Published inside the npm package so the contract is versioned with the code that implements it.",
+  "webhookEndpoint": {
+    "pathTemplate": "guardian/approval-resolved/{workflowId}/{nodeId}",
+    "n8nExpression": "=guardian/approval-resolved/{{$workflow.id}}/{{$nodeId}}",
+    "httpMethod": "POST",
+    "responseMode": "onReceived",
+    "mustBind": ["workflowId", "nodeId"]
+  },
+  "registration": {
+    "method": "POST",
+    "path": "/v1/admin/webhooks",
+    "requiredBodyFields": ["url", "events", "enabled", "signingSecret", "workflowId", "nodeId"],
+    "events": ["approval_resolved"],
+    "conflictStatus": 409
+  },
+  "list": {
+    "method": "GET",
+    "path": "/v1/admin/webhooks"
+  },
+  "delete": {
+    "method": "DELETE",
+    "pathTemplate": "/v1/admin/webhooks/{id}"
+  },
+  "semantics": {
+    "registerOwnership": "Registration MUST send workflowId and nodeId so the backend can bind one registration per (organizationId, workflowId, nodeId).",
+    "reRegisterLegacy": "checkExists MUST return false for a stored registration whose persisted workflowId/nodeId do not match the current workflow/node, forcing re-registration under ownership.",
+    "deleteStaleUrlBeforeRegister": "create MUST DELETE the stored registration first when the computed webhook URL changed (e.g. tunnel/domain rotation).",
+    "deleteSameUrlConflicts": "create MUST DELETE any existing registration whose url equals the new webhook URL before registering.",
+    "deleteOnDeactivate": "delete MUST DELETE the stored registration on workflow deactivation.",
+    "verifyHmacSignature": "Incoming deliveries MUST be rejected (401) unless x-guardian-webhook-signature matches HMAC-SHA256(secret, rawBody)."
+  }
+}
