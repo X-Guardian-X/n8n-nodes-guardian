@@ -27,7 +27,7 @@
     "registerOwnership": "Registration MUST send workflowId and nodeId so the backend can bind one registration per (organizationId, workflowId, nodeId).",
     "reRegisterLegacy": "checkExists MUST return false for a stored registration whose persisted workflowId/nodeId do not match the current workflow/node, forcing re-registration under ownership.",
     "deleteStaleUrlBeforeRegister": "create MUST DELETE the stored registration first when the computed webhook URL changed (e.g. tunnel/domain rotation).",
-    "deleteSameUrlConflicts": "create MUST DELETE any existing registration whose url equals the new webhook URL before registering.",
+    "preserveSameUrlRegistrations": "create MUST NOT DELETE any existing registration — even one whose url equals the new webhook URL. The backend updates the (organizationId, workflowId, nodeId) binding in place; a same-URL row owned by another workflow/node is flagged and left intact. Cleanup that cannot distinguish stale from live MUST fail closed: leave the registration.",
     "deleteOnDeactivate": "delete MUST DELETE the stored registration on workflow deactivation.",
     "verifyHmacSignature": "Incoming deliveries MUST be rejected (401) unless x-guardian-webhook-signature matches HMAC-SHA256(secret, rawBody)."
   }

@@ -141,14 +141,54 @@ reset();
 	);
 }
 
-// ── 4. deleteSameUrlConflicts ──────────────────────────────────────────
+// ── 4. preserveSameUrlRegistrations — fail closed ─────────────────────
+// A registration belonging to a still-active workflow must never be
+// deleted as collateral. If a same-URL row exists that this node does not
+// own, create() must leave it intact (flag it) and let the backend decide.
 reset({ webhooks: [{ id: 'wh-dup', url: WEBHOOK_URL, enabled: true, events: ['approval_resolved'] }] });
 {
 	await create.call(makeCtx({ staticData: {} }));
 	assertTrue(
-		calls.some((c) => c.method === contract.delete.method && c.url.endsWith('/v1/admin/webhooks/wh-dup')),
-		'create() DELETEs an existing registration holding the same URL',
+		!calls.some((c) => c.method === contract.delete.method && c.url.endsWith('/v1/admin/webhooks/wh-dup')),
+		'create() must NOT DELETE an existing registration holding the same URL',
 	);
+	assertTrue(
+		calls.some((c) => c.method === 'POST'),
+		'create() still registers after declining to delete the same-URL row',
+	);
+}
+
+// ── 4b. failed registration must not leave the org de-registered ───────
+// The dangerous sequence this guards against: delete live row, then POST
+// fails → workflow published but nothing registered. With deletions
+// banned in create(), a failing POST can never orphan the workflow.
+reset({ webhooks: [{ id: 'wh-live', url: WEBHOOK_URL, enabled: true, events: ['approval_resolved'], workflowId: WF_ID, nodeId: NODE_ID }] });
+{
+	const realFetch = globalThis.fetch;
+	globalThis.fetch = async (url, opts = {}) => {
+		const u = String(url);
+		const method = opts.method ?? 'GET';
+		calls.push({ method, url: u, body: opts.body ? JSON.parse(opts.body) : undefined });
+		if (method === 'GET' && u.endsWith(contract.list.path)) return { ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify(listResponse) };
+		if (method === 'POST' && u.endsWith(contract.registration.path)) return { ok: false, status: 409, statusText: 'Conflict', text: async () => JSON.stringify({ error: 'ACTION_TYPE_ALREADY_BOUND' }) };
+		if (method === 'DELETE') return { ok: true, status: 200, statusText: 'OK', text: async () => '{}' };
+		return { ok: true, status: 200, statusText: 'OK', text: async () => '{}' };
+	};
+	try {
+		let threw = false;
+		try {
+			await create.call(makeCtx({ staticData: {} }));
+		} catch {
+			threw = true;
+		}
+		assertTrue(threw, 'create() surfaces a failed registration POST');
+		assertTrue(
+			!calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/v1/admin/webhooks/wh-live')),
+			'create() issued no DELETE — the live registration survives a failed re-registration',
+		);
+	} finally {
+		globalThis.fetch = realFetch;
+	}
 }
 
 // ── 5. reRegisterLegacy: missing/mismatched ownership forces re-create ─

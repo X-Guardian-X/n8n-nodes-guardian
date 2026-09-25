@@ -171,10 +171,14 @@ export class GuardianApprovalTrigger implements INodeType {
 					}
 				}
 
+				// Never delete registrations here. A same-URL row owned by another
+				// workflow/node is flagged and left intact — cleanup that cannot
+				// distinguish stale from live must fail closed. The backend updates
+				// this node's own (workflowId, nodeId) binding in place on POST.
 				const list = await guardianRequest(this, 'GET', '/v1/admin/webhooks') as GuardianWebhookListResponse;
 				for (const webhook of list.webhooks ?? []) {
-					if (webhook.url === webhookUrl) {
-						await guardianRequest(this, 'DELETE', `/v1/admin/webhooks/${encodeURIComponent(webhook.id)}`);
+					if (webhook.url === webhookUrl && (webhook.workflowId !== this.getWorkflow().id || webhook.nodeId !== this.getNode().id)) {
+						this.logger.warn('Guardian Approval Trigger: an existing registration already serves this webhook URL; leaving it intact and relying on the backend binding update', { webhookId: webhook.id });
 					}
 				}
 
