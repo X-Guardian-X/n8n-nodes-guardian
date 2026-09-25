@@ -64,6 +64,21 @@ function buildExecutionScopedIdempotencyKey(
 	return `n8n-exec:${executionId}:${digest}`;
 }
 
+const N8N_EXEC_KEY_PREFIX = 'n8n-exec:';
+
+/**
+ * True when the intent's stored idempotency key was minted by THIS n8n
+ * workflow execution — meaning the execution claim was consumed by an
+ * earlier node in the same run (the documented Agent Gate Evaluate & Claim
+ * → Enforce combination), not by a different run. Auto-derived keys embed
+ * the claiming execution's id; custom keys cannot be attributed and always
+ * return false.
+ */
+function claimedByThisExecution(storedIdempotencyKey: unknown, executionId: string): boolean {
+	return typeof storedIdempotencyKey === 'string'
+		&& storedIdempotencyKey.startsWith(`${N8N_EXEC_KEY_PREFIX}${executionId}:`);
+}
+
 /**
  * Parses a payload parameter that may arrive as a JSON string or an already
  * resolved object. Throws NodeOperationError on malformed JSON instead of
@@ -600,21 +615,38 @@ export class Guardian implements INodeType {
 							});
 
 							if (execResponse.idempotent === true) {
+								// The claim is consumed either by this same workflow run
+								// (e.g. an earlier node claimed it) or by another run.
+								// A self-claim is not a denial: the intent's decision is
+								// still ALLOW and this run holds the single claim.
+								const selfClaimed = claimedByThisExecution(
+									(evalResponse as Record<string, unknown>).idempotencyKey,
+									this.getExecutionId(),
+								);
 								outputItem.json = {
 									...outputItem.json,
 									...execResponse,
 									_guardian: {
-										decision: 'DENY',
+										decision: 'ALLOW',
 										intentRunId,
 										actionType,
 										operation,
 										executed: false,
 										idempotent: true,
 										executedAt: execResponse.executedAt,
+										...(selfClaimed ? { alreadyClaimed: true } : { duplicateBlocked: true }),
 									},
-									error: 'This Guardian intent was already executed by another run. Duplicate action blocked.',
+									...(selfClaimed
+										? {
+											message:
+												'Execution claim already held by this workflow run — the action remains authorized once. Do not perform it a second time.',
+										}
+										: {
+											error:
+												'This Guardian intent was already executed by another run. Duplicate action blocked.',
+										}),
 								};
-								deniedItems.push(outputItem);
+								(selfClaimed ? allowedItems : deniedItems).push(outputItem);
 							} else {
 								outputItem.json = {
 									...outputItem.json,
@@ -686,17 +718,40 @@ export class Guardian implements INodeType {
 						});
 
 						if (execResponse.idempotent === true) {
-							deniedItems.push({
+							// This op only knows the intentRunId, so fetch the intent to
+							// attribute the existing claim: an n8n-exec key minted by this
+							// execution means an earlier node in the SAME run claimed it —
+							// not a denial. Any other key means another run owns the claim.
+							const intentResponse = await guardianApiRequest<Record<string, unknown>>(credentials, {
+								method: 'GET',
+								path: `/v1/intents/${encodeURIComponent(intentRunId)}`,
+								node: this.getNode(),
+							});
+							const selfClaimed = claimedByThisExecution(
+								intentResponse.idempotencyKey,
+								this.getExecutionId(),
+							);
+							const target = selfClaimed ? allowedItems : deniedItems;
+							target.push({
 								json: {
 									...execResponse,
 									_guardian: {
-										decision: 'DENY',
+										decision: 'ALLOW',
 										intentRunId,
 										executed: false,
 										idempotent: true,
 										executedAt: execResponse.executedAt,
+										...(selfClaimed ? { alreadyClaimed: true } : { duplicateBlocked: true }),
 									},
-									error: 'This Guardian intent was already executed by another run. Duplicate action blocked.',
+									...(selfClaimed
+										? {
+											message:
+												'Execution claim already held by this workflow run — the action remains authorized once. Do not perform it a second time.',
+										}
+										: {
+											error:
+												'This Guardian intent was already executed by another run. Duplicate action blocked.',
+										}),
 								},
 								pairedItem: { item: i },
 							});
@@ -849,9 +904,27 @@ export class Guardian implements INodeType {
 						guardianMeta.executionClaimed = executionResponse.executed === true && executionResponse.idempotent !== true;
 						guardianMeta.executedAt = executionResponse.executedAt;
 						if (executionResponse.idempotent === true) {
-							guardianMeta.duplicateBlocked = true;
-							outputItem.json.error = 'This Guardian intent was already claimed by another execution. Duplicate action blocked.';
-							deniedItems.push(outputItem);
+							// Attribute the consumed claim: an n8n-exec key minted by this
+							// workflow execution means an earlier node in the SAME run
+							// claimed it (the documented Agent Gate Evaluate & Claim →
+							// Enforce combination). That is not a denial — the intent's
+							// decision is still ALLOW and this run holds the one claim.
+							// Any other key means another execution owns the claim.
+							const selfClaimed = claimedByThisExecution(
+								response.idempotencyKey,
+								this.getExecutionId(),
+							);
+							guardianMeta.executed = false;
+							if (selfClaimed) {
+								guardianMeta.alreadyClaimed = true;
+								outputItem.json.message =
+									'Execution claim already held by this workflow run — the action remains authorized once. Do not perform it a second time.';
+								allowedItems.push(outputItem);
+							} else {
+								guardianMeta.duplicateBlocked = true;
+								outputItem.json.error = 'This Guardian intent was already claimed by another execution. Duplicate action blocked.';
+								deniedItems.push(outputItem);
+							}
 							continue;
 						}
 						if (executionResponse.decision !== 'ALLOW' || executionResponse.executed !== true) {
@@ -860,6 +933,7 @@ export class Guardian implements INodeType {
 							deniedItems.push(outputItem);
 							continue;
 						}
+						guardianMeta.executed = true;
 					}
 
 					if (decision === 'ALLOW' || decision === 'OBSERVED') {

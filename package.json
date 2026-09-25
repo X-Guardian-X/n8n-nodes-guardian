@@ -31,7 +31,7 @@
     "lint:fix": "n8n-node lint --fix",
     "release": "n8n-node release",
     "pretest": "npm run build",
-    "test": "node test/webhook-contract.test.mjs"
+    "test": "node test/webhook-contract.test.mjs && node test/claim-attribution.test.mjs"
   },
   "files": [
     "dist",
