@@ -24,9 +24,16 @@ interface AgentGateInput {
 	reason?: string;
 }
 
-function normalizeAgentGatePayload(input: AgentGateInput): Record<string, unknown> {
+// Exported for unit testing — pure function, no I/O.
+export function normalizeAgentGatePayload(input: AgentGateInput): Record<string, unknown> {
 	const payload: Record<string, unknown> = input.payload ? { ...input.payload } : {};
-	if (input.amount !== undefined) payload.amount = input.amount;
+	// The Amount field defaults to 0 in the UI, so an untouched field and a
+	// deliberate "set amount to 0" are indistinguishable here. Treat 0 as
+	// "untouched" only when the Payload JSON already supplies an amount —
+	// keep the JSON's value instead of letting the field default clobber it.
+	// Any non-zero Amount field still wins, same as before this change.
+	const amountFieldIsUntouchedDefault = input.amount === 0 && payload.amount !== undefined;
+	if (input.amount !== undefined && !amountFieldIsUntouchedDefault) payload.amount = input.amount;
 	const recipient = input.recipient || (typeof payload.recipient === 'string' ? payload.recipient : '');
 	if (recipient) {
 		payload.recipient = recipient;
