@@ -12,7 +12,7 @@
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
-const { normalizeAgentGatePayload } = require('../dist/nodes/Guardian/Guardian.node.js');
+const { normalizeAgentGatePayload, Guardian } = require('../dist/nodes/Guardian/Guardian.node.js');
 
 let passed = 0;
 function assertEqual(actual, expected, message) {
@@ -63,6 +63,48 @@ function assertEqual(actual, expected, message) {
 		amount: 250,
 	});
 	assertEqual(result.amount, 250, 'no payload + Amount 250 → amount is 250');
+}
+
+// ── Fix: the Amount field's declared UI default changed from 0 to '' ──────
+// (Guardian.node.ts ~line 444), so an untouched field now reaches this
+// function as `amount: undefined`, not `amount: 0` — see the amountRaw/
+// amount conversion at Guardian.node.ts ~line 982-983. Cases 1-4 above still
+// hold: `amount: 0` passed into this function now ALWAYS means a genuinely
+// deliberate 0 (the UI can no longer produce 0 for "untouched"). These two
+// cases cover the untouched case itself, now correctly represented.
+
+// 5. no payload.amount, Amount field untouched (amount: undefined) →
+//    amount must never be written as 0 — it must stay absent entirely.
+{
+	const result = normalizeAgentGatePayload({
+		actionType: 'payment.send',
+		payload: {},
+		amount: undefined,
+	});
+	assertEqual(result.amount, undefined, 'no payload.amount + Amount untouched (undefined) → amount is never defaulted to 0');
+	assertEqual('amount' in result, false, 'no payload.amount + Amount untouched → "amount" key is absent, not present-and-0');
+}
+
+// 6. payload.amount=5000, Amount field untouched (amount: undefined) →
+//    the 1.0.9 fix, re-verified under the corrected "untouched" semantics.
+{
+	const result = normalizeAgentGatePayload({
+		actionType: 'payment.send',
+		payload: { amount: 5000 },
+		amount: undefined,
+	});
+	assertEqual(result.amount, 5000, '1.0.9 fix still holds: payload.amount=5000 + Amount untouched (undefined) → keeps 5000');
+}
+
+// ── Guard against the regression recurring: the pure-function cases above
+// can't by themselves catch a revert of the UI field's declared default —
+// n8n stores a declared numeric default as the field's real stored value
+// the moment the node is created, which is the actual root cause this fix
+// addresses (not something the normalizeAgentGatePayload cases exercise).
+{
+	const node = new Guardian();
+	const prop = node.description.properties.find((p) => p.name === 'agentAmount');
+	assertEqual(prop.default, '', 'Amount field (agentAmount) declared default is "" (empty), not 0 — regression guard');
 }
 
 console.log(`\n${passed} assertions passed.`);

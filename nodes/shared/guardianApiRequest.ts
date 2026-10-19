@@ -16,6 +16,23 @@ export interface GuardianApiRequestOptions {
 	node: INode;
 }
 
+// Fixed, non-configurable: Guardian not answering within this window means
+// nothing was decided, so the caller must treat it exactly like any other
+// unreachable-API error — never assume a decision. No retries: a retry is a
+// product decision (idempotency/backoff semantics) left to a future change,
+// not something to add silently here.
+const GUARDIAN_API_TIMEOUT_MS = 30_000;
+
+// Attached to the thrown NodeApiError so a call site that needs to react to
+// a *specific* Guardian response (e.g. the Enforce resource's kill-switch
+// carve-out) can inspect the real status/body, instead of parsing the
+// flattened message string. Optional — every existing catch site that only
+// reads `error.message` keeps working unchanged.
+export interface GuardianApiErrorDetails {
+	guardianStatus?: number;
+	guardianResponseBody?: unknown;
+}
+
 export function buildGuardianRequestHeaders(
 	credentials: GuardianApiCredentials,
 	rawBody: string,
@@ -62,8 +79,19 @@ export async function guardianApiRequest<T = IDataObject>(
 			method: options.method,
 			headers,
 			body: options.body === undefined ? undefined : rawBody,
+			// Fixed 30s timeout, no retries — see GUARDIAN_API_TIMEOUT_MS above.
+			signal: AbortSignal.timeout(GUARDIAN_API_TIMEOUT_MS),
 		});
 	} catch (networkError) {
+		// AbortSignal.timeout firing surfaces as a DOMException/Error named
+		// 'TimeoutError' (WHATWG spec; implemented by undici/Node's fetch).
+		// Handled as its own case — same throw path as every other network
+		// error below, just a message that says nothing was decided rather
+		// than implying a reachability/Base-URL problem.
+		if (networkError instanceof Error && networkError.name === 'TimeoutError') {
+			const message = 'Guardian did not answer within 30 seconds. Nothing was decided, so the action must not run.';
+			throw new NodeApiError(options.node, { message } as JsonObject);
+		}
 		// DNS failure, connection refused, TLS error — the host is wrong or down.
 		const message = `Could not reach the Guardian API — check the Base URL on your credential (tried "${baseUrl}${options.path}": ${networkError instanceof Error ? networkError.message : String(networkError)})`;
 		throw new NodeApiError(options.node, { message } as JsonObject);
@@ -89,12 +117,31 @@ export async function guardianApiRequest<T = IDataObject>(
 			throw new NodeApiError(options.node, { message } as JsonObject);
 		}
 		const errorDataWithDetails = responseData as { error?: string; message?: string; details?: Array<{ field: string; message: string }> };
-		const baseMessage = errorDataWithDetails.message || errorDataWithDetails.error || response.statusText;
+		// Always fall through to something non-empty, even when the body has
+		// neither `.message` nor `.error` (e.g. `{}`) and statusText is blank
+		// (common with HTTP/2, which has no reason phrases) — the raw body is
+		// appended below regardless, so the message is never just a bare,
+		// unexplained status code.
+		const baseMessage = errorDataWithDetails.message || errorDataWithDetails.error || response.statusText || 'no error message in response body';
 		const detailStr = errorDataWithDetails.details?.length
 			? ' (' + errorDataWithDetails.details.map(d => `${d.field}: ${d.message}`).join('; ') + ')'
 			: '';
-		const message = `Guardian API request failed (${response.status}): ${baseMessage}${detailStr}`;
-		throw new NodeApiError(options.node, { message } as JsonObject);
+		const message = `Guardian API request failed (${response.status}): ${baseMessage}${detailStr} [body: ${responseText || '{}'}]`;
+		// `message` must ALSO be passed via the options (3rd) argument, not
+		// just inside errorResponse: NodeApiError only skips its own generic
+		// per-status-code message (e.g. "Authorization failed - please check
+		// your credentials" for 401) when `options.message` is set. Setting
+		// `httpCode` (needed below for guardianStatus/the Enforce kill-switch
+		// check) without this would silently replace our status+body message
+		// with that generic text.
+		const apiError = new NodeApiError(
+			options.node,
+			{ message } as JsonObject,
+			{ message, httpCode: String(response.status) },
+		);
+		const errorDetails: GuardianApiErrorDetails = { guardianStatus: response.status, guardianResponseBody: responseData };
+		Object.assign(apiError, errorDetails);
+		throw apiError;
 	}
 
 	return responseData as T;

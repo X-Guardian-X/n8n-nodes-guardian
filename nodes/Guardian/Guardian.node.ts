@@ -4,10 +4,11 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	JsonObject,
 } from 'n8n-workflow';
 import { createHash } from 'crypto';
-import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
-import { guardianApiRequest, type GuardianApiCredentials } from '../shared/guardianApiRequest';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { guardianApiRequest, type GuardianApiCredentials, type GuardianApiErrorDetails } from '../shared/guardianApiRequest';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared helpers (used by the Agent Gate resource)
@@ -441,8 +442,18 @@ export class Guardian implements INodeType {
 				displayName: 'Amount',
 				name: 'agentAmount',
 				type: 'number',
-				default: 0,
-				description: 'Payment amount if applicable, e.g. 500',
+				// Deliberately NOT 0. A declared numeric default of 0 means n8n
+				// stores 0 as this field's actual value the moment the node is
+				// created — getNodeParameter then returns 0 for an untouched
+				// field, indistinguishable from an agent/caller who genuinely
+				// means "zero". '' makes an untouched field resolve to '' (see
+				// the amountRaw/amount conversion below), which normalizeAgentGatePayload
+				// treats as "no value given" — never written into the payload,
+				// and an existing payload.amount from Payload JSON survives
+				// untouched (the 1.0.9 fix). A real 0 typed into this field is
+				// still honored as deliberate.
+				default: '',
+				description: 'Payment amount if applicable, e.g. 500. Leave blank if the action has no amount — do not enter 0 unless the amount really is zero.',
 				displayOptions: { show: { resource: ['agentGate'] } },
 			},
 			{
@@ -900,13 +911,51 @@ export class Guardian implements INodeType {
 							continue;
 						}
 
-						const executionResponse = await guardianApiRequest<Record<string, unknown>>(credentials, {
-							method: 'POST',
-							path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
-							headers,
-							body: { payload: response.payloadJson },
-							node: this.getNode(),
-						});
+						let executionResponse: Record<string, unknown>;
+						try {
+							executionResponse = await guardianApiRequest<Record<string, unknown>>(credentials, {
+								method: 'POST',
+								path: `/v1/intents/${encodeURIComponent(intentRunId)}/execute`,
+								headers,
+								body: { payload: response.payloadJson },
+								node: this.getNode(),
+							});
+						} catch (executeError) {
+							// Kill switch (GLOBAL or project-scoped — the backend returns the
+							// identical shape for both: 403 { error: 'INCIDENT_MODE' }, with
+							// no `decision`/`reason` field) is the ONE execute-time failure
+							// this resource treats as a real Guardian verdict rather than a
+							// request failure — the GET step above already does this for a
+							// kill switch active since before /check ran (stored decision is
+							// DENY). This covers the other timing: ALLOW was stored at
+							// /check time, the kill switch activated afterward, and THIS
+							// execute call is where it's actually enforced.
+							// Every other failure (401 bad key, 5xx, network, timeout,
+							// or any other 403 shape — e.g. break-glass-admin-required,
+							// which DOES carry a decision/reason) is unchanged: rethrown,
+							// same as before this fix.
+							const details = executeError as Partial<GuardianApiErrorDetails>;
+							const body = details.guardianResponseBody as { error?: unknown; decision?: unknown } | undefined;
+							const isKillSwitchBlock =
+								details.guardianStatus === 403 &&
+								!!body &&
+								typeof body === 'object' &&
+								body.error === 'INCIDENT_MODE' &&
+								body.decision === undefined;
+							// NodeApiError's constructor special-cases an already-NodeApiError
+							// input: it returns that same instance unchanged (see
+							// n8n-workflow's node-api.error.js), so this is a no-op rewrap,
+							// not a double-wrap — required by the lint rule that forbids a
+							// bare `throw <caught error>`, with identical behavior either way.
+							if (!isKillSwitchBlock) throw new NodeApiError(this.getNode(), executeError as JsonObject);
+
+							const guardianMeta = outputItem.json._guardian as Record<string, unknown>;
+							guardianMeta.executionClaimed = false;
+							guardianMeta.verified = false;
+							outputItem.json.error = 'Execution blocked — Guardian kill switch (INCIDENT_MODE) is active. The action must not run.';
+							deniedItems.push(outputItem);
+							continue;
+						}
 						const guardianMeta = outputItem.json._guardian as Record<string, unknown>;
 						guardianMeta.executionClaimed = executionResponse.executed === true && executionResponse.idempotent !== true;
 						guardianMeta.executedAt = executionResponse.executedAt;

@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-guardian",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "n8n community nodes for Guardian Safety Gate — HMAC-signed policy enforcement, atomic execution claims, and automatic human approvals for AI workflows.",
   "keywords": [
     "n8n-community-node-package",
@@ -31,7 +31,7 @@
     "lint:fix": "n8n-node lint --fix",
     "release": "n8n-node release",
     "pretest": "npm run build",
-    "test": "node test/webhook-contract.test.mjs && node test/claim-attribution.test.mjs && node test/agent-gate-amount.test.mjs"
+    "test": "node test/webhook-contract.test.mjs && node test/claim-attribution.test.mjs && node test/agent-gate-amount.test.mjs && node test/killswitch-enforce.test.mjs && node test/timeout.test.mjs"
   },
   "files": [
     "dist",
