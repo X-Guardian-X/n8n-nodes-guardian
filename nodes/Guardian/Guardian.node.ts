@@ -580,13 +580,51 @@ export class Guardian implements INodeType {
 						if (idempotencyKey) headers['x-idempotency-key'] = idempotencyKey;
 						if (options.testMode) headers['x-guardian-testmode'] = 'true';
 
-						const evalResponse = await guardianApiRequest(credentials, {
-							method: 'POST',
-							path: '/v1/intents/check',
-							headers,
-							body,
-							node: this.getNode(),
-						});
+						let evalResponse: Record<string, unknown>;
+						try {
+							evalResponse = await guardianApiRequest(credentials, {
+								method: 'POST',
+								path: '/v1/intents/check',
+								headers,
+								body,
+								node: this.getNode(),
+							});
+						} catch (checkError) {
+							// Project (or global) kill switch active at /check time: the
+							// backend returns HTTP 403 with a real DENY decision body
+							// (decision: 'DENY', reason: 'INCIDENT_MODE', intentRunId,
+							// status, payloadHash) — this is a genuine Guardian verdict,
+							// not a failed request. Route it to Denied like any other DENY
+							// instead of throwing. Every other error shape (other 403s,
+							// 401, 5xx, network, timeout) is unchanged: rethrown.
+							const details = checkError as Partial<GuardianApiErrorDetails>;
+							const errBody = details.guardianResponseBody as
+								| { decision?: unknown; intentRunId?: unknown; status?: unknown }
+								| undefined;
+							const isKillSwitchDeny =
+								details.guardianStatus === 403 &&
+								!!errBody &&
+								typeof errBody === 'object' &&
+								errBody.decision === 'DENY';
+							if (!isKillSwitchDeny) throw new NodeApiError(this.getNode(), checkError as JsonObject);
+
+							deniedItems.push({
+								json: {
+									...(errBody as Record<string, unknown>),
+									message: 'Guardian kill switch is active (INCIDENT_MODE). The action must not run.',
+									_guardian: {
+										decision: 'DENY',
+										intentRunId: errBody.intentRunId ?? null,
+										actionType,
+										operation,
+										executed: false,
+										observed: false,
+									},
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
 
 						const decision = String(evalResponse.decision ?? '').toUpperCase();
 						const intentRunId = String(evalResponse.intentRunId ?? '');
@@ -1069,6 +1107,39 @@ export class Guardian implements INodeType {
 							node: this.getNode(),
 						});
 					} catch (checkError) {
+						// Project (or global) kill switch active at /check time: the backend
+						// returns HTTP 403 with a real DENY decision body (decision: 'DENY',
+						// reason: 'INCIDENT_MODE', intentRunId, status, payloadHash) — this is
+						// a genuine Guardian verdict, not a failed request. Report it as DENY
+						// (not ERROR) on the normal output, same wording as the check resource.
+						// Every other error shape (other 403s, 401, 5xx, network, timeout) is
+						// unchanged: ERROR, as before this fix.
+						const details = checkError as Partial<GuardianApiErrorDetails>;
+						const errBody = details.guardianResponseBody as
+							| { decision?: unknown; intentRunId?: unknown; status?: unknown }
+							| undefined;
+						const isKillSwitchDeny =
+							details.guardianStatus === 403 &&
+							!!errBody &&
+							typeof errBody === 'object' &&
+							errBody.decision === 'DENY';
+
+						if (isKillSwitchDeny) {
+							allowedItems.push({
+								json: {
+									decision: 'DENY',
+									canProceed: false,
+									executed: false,
+									message: 'Guardian kill switch is active (INCIDENT_MODE). The action must not run.',
+									intentRunId: errBody.intentRunId ?? null,
+									actionType,
+									payload,
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
+
 						// Agent Gate is consumed directly by an AI agent as a tool. Throwing
 						// here would halt the whole workflow; instead return a graceful ERROR
 						// JSON so the agent can decide how to proceed (matches the original
@@ -1136,7 +1207,8 @@ export class Guardian implements INodeType {
 								decision: 'REQUIRE_APPROVAL',
 								canProceed: false,
 								executed: false,
-								message: 'This action requires human approval. It has been submitted for approval.',
+								message: `Not an error. This action is waiting for human approval (request ${intentRunId}). Do not call this tool again for the same action. Tell the user it is waiting for approval and stop.`,
+								nextStep: 'wait_for_approval',
 								intentRunId,
 								actionType,
 								payload,
