@@ -178,3 +178,9 @@ Your Guardian policy rules match against these fields (e.g. "block if amount > 5
 
 - Docs: https://guardiansafetygate.com/docs
 - Issues: Open a GitHub issue on this repo
+
+---
+
+## License
+
+MIT. See LICENSE. The Guardian name and logo are not covered by this license.
