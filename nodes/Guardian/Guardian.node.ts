@@ -599,13 +599,14 @@ export class Guardian implements INodeType {
 							// 401, 5xx, network, timeout) is unchanged: rethrown.
 							const details = checkError as Partial<GuardianApiErrorDetails>;
 							const errBody = details.guardianResponseBody as
-								| { decision?: unknown; intentRunId?: unknown; status?: unknown }
+								| { decision?: unknown; reason?: unknown; intentRunId?: unknown; status?: unknown }
 								| undefined;
 							const isKillSwitchDeny =
 								details.guardianStatus === 403 &&
 								!!errBody &&
 								typeof errBody === 'object' &&
-								errBody.decision === 'DENY';
+								errBody.decision === 'DENY' &&
+								errBody.reason === 'INCIDENT_MODE';
 							if (!isKillSwitchDeny) throw new NodeApiError(this.getNode(), checkError as JsonObject);
 
 							deniedItems.push({
@@ -1116,13 +1117,14 @@ export class Guardian implements INodeType {
 						// unchanged: ERROR, as before this fix.
 						const details = checkError as Partial<GuardianApiErrorDetails>;
 						const errBody = details.guardianResponseBody as
-							| { decision?: unknown; intentRunId?: unknown; status?: unknown }
+							| { decision?: unknown; reason?: unknown; intentRunId?: unknown; status?: unknown }
 							| undefined;
 						const isKillSwitchDeny =
 							details.guardianStatus === 403 &&
 							!!errBody &&
 							typeof errBody === 'object' &&
-							errBody.decision === 'DENY';
+							errBody.decision === 'DENY' &&
+							errBody.reason === 'INCIDENT_MODE';
 
 						if (isKillSwitchDeny) {
 							allowedItems.push({

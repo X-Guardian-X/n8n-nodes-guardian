@@ -17,10 +17,12 @@
 // error (decision ERROR). Now it's routed as a normal DENY: Denied output
 // for the check resource, allowedItems (decision: 'DENY') for Agent Gate —
 // Agent Gate's single-output AI-tool pattern, same as its existing
-// OBSERVED/DENY/REQUIRE_APPROVAL/ALLOW branches. Every other error shape
-// (403 without a decision field, 401, 5xx, network, timeout) is unchanged —
-// the Enforce resource's own kill-switch handling (Guardian.node.ts
-// ~925-956) is untouched and not exercised here.
+// OBSERVED/DENY/REQUIRE_APPROVAL/ALLOW branches. The match requires BOTH
+// decision 'DENY' AND reason 'INCIDENT_MODE' — decision 'DENY' alone (e.g.
+// a different reason) is not enough and keeps the pre-fix behaviour. Every
+// other error shape (403 without a decision field, 401, 5xx, network,
+// timeout) is unchanged — the Enforce resource's own kill-switch handling
+// (Guardian.node.ts ~925-956) is untouched and not exercised here.
 
 import { createRequire } from 'module';
 
@@ -215,6 +217,48 @@ const KILLSWITCH_CHECK_BODY = {
 		agentPayload: { amount: 100 },
 	}));
 	assertEqual(allowed[0].json.decision, 'ERROR', 'Agent Gate: 403 WITHOUT decision → still ERROR, not mistaken for kill-switch DENY (unchanged)');
+}
+
+// A 403 WITH decision "DENY" but a DIFFERENT reason (not "INCIDENT_MODE")
+// must also NOT be mistaken for the kill switch — it keeps today's
+// pre-this-branch behaviour (check resource: throws; Agent Gate: ERROR).
+// Tightening: decision "DENY" alone is not enough, reason must also be
+// exactly "INCIDENT_MODE".
+
+// -- check resource: still throws --
+{
+	responder = (method, url) => {
+		if (method === 'POST' && url.includes('/v1/intents/check')) return { status: 403, body: { decision: 'DENY', reason: 'SOMETHING_ELSE' } };
+		return { status: 500, body: { error: `unexpected ${method} ${url}` } };
+	};
+	let threw = false;
+	try {
+		await node.execute.call(makeContext({
+			resource: 'check',
+			operation: 'evaluate',
+			actionType: 'payment.send',
+			payload: { amount: 100 },
+		}));
+	} catch (error) {
+		threw = true;
+		assertTrue(error.message.includes('403'), 'check/evaluate: 403 decision DENY but reason SOMETHING_ELSE → still throws, message includes status (unchanged)');
+	}
+	assertTrue(threw, 'check/evaluate: 403 decision DENY but reason SOMETHING_ELSE → still throws (not mistaken for the kill switch)');
+}
+
+// -- Agent Gate: still reports ERROR (not DENY) --
+{
+	responder = (method, url) => {
+		if (method === 'POST' && url.includes('/v1/intents/check')) return { status: 403, body: { decision: 'DENY', reason: 'SOMETHING_ELSE' } };
+		return { status: 500, body: { error: `unexpected ${method} ${url}` } };
+	};
+	const [allowed] = await node.execute.call(makeContext({
+		resource: 'agentGate',
+		agentGateOperation: 'evaluateAndClaim',
+		agentActionType: 'payment.send',
+		agentPayload: { amount: 100 },
+	}));
+	assertEqual(allowed[0].json.decision, 'ERROR', 'Agent Gate: 403 decision DENY but reason SOMETHING_ELSE → still ERROR, not mistaken for the kill switch (unchanged)');
 }
 
 console.log(`\n${passed} assertions passed.`);
