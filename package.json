@@ -31,7 +31,7 @@
     "lint:fix": "n8n-node lint --fix",
     "release": "n8n-node release",
     "pretest": "npm run build",
-    "test": "node test/webhook-contract.test.mjs && node test/claim-attribution.test.mjs && node test/agent-gate-amount.test.mjs && node test/killswitch-enforce.test.mjs && node test/timeout.test.mjs && node test/approval-message-killswitch.test.mjs && node test/approval-trigger-test-mode.test.mjs"
+    "test": "node test/webhook-contract.test.mjs && node test/claim-attribution.test.mjs && node test/agent-gate-amount.test.mjs && node test/killswitch-enforce.test.mjs && node test/timeout.test.mjs && node test/approval-message-killswitch.test.mjs && node test/approval-trigger-test-mode.test.mjs && node test/credential-failure.test.mjs"
   },
   "files": [
     "dist",
