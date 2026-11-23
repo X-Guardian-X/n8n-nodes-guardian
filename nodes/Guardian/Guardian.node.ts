@@ -549,12 +549,40 @@ export class Guardian implements INodeType {
 		const deniedItems: INodeExecutionData[] = [];
 		const approvalItems: INodeExecutionData[] = [];
 
-		const credentials = await this.getCredentials('guardianApi') as unknown as GuardianApiCredentials;
+		// Resolved once, before the per-item loop — if the credential itself
+		// cannot be resolved (e.g. it was deleted), this must NOT escape
+		// execute() uncaught: with On Error = Continue (regular output), n8n
+		// would otherwise place the resulting error item on output 0
+		// ("Allowed") rather than anywhere decision-aware, since this failure
+		// happens before any per-item try/catch runs at all. Every input item
+		// is denied with decision ERROR instead — nothing is ever allowed
+		// through without a credential. Every other error (401, bad Base URL,
+		// unreachable host, etc.) still happens inside guardianApiRequest,
+		// inside the per-item try below, and is unaffected by this change.
+		let credentials: GuardianApiCredentials;
+		try {
+			credentials = await this.getCredentials('guardianApi') as unknown as GuardianApiCredentials;
+		} catch (error: unknown) {
+			if (this.continueOnFail()) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				for (let i = 0; i < items.length; i++) {
+					deniedItems.push({
+						json: { error: errorMessage, _guardian: { decision: 'ERROR' } },
+						pairedItem: { item: i },
+					});
+				}
+				return [[], deniedItems, []];
+			}
+			throw new NodeOperationError(
+				this.getNode(),
+				error instanceof Error ? error : 'Guardian credential could not be resolved',
+			);
+		}
 
 		for (let i = 0; i < items.length; i++) {
-			const resource = this.getNodeParameter('resource', i, 'check') as 'check' | 'enforce' | 'agentGate';
-
 			try {
+				const resource = this.getNodeParameter('resource', i, 'check') as 'check' | 'enforce' | 'agentGate';
+
 				// ═══════════════════════════════════════════════════════════════
 				// RESOURCE: CHECK
 				// ═══════════════════════════════════════════════════════════════

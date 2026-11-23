@@ -2,7 +2,7 @@
 
 Official n8n community node for **[Guardian Safety Gate](https://guardiansafetygate.com)** — the policy decision layer for AI agents, workflows, and backends.
 
-Guardian decides whether an action is allowed **before** it runs. It does not perform the action itself. Use it to require human approval for high-risk operations, block forbidden actions, or log everything for compliance.
+Guardian decides whether an action is allowed **before** it runs. It does not perform the action itself. Use it to require human approval for high-risk operations, block forbidden actions, and keep a record of every decision.
 
 ---
 
@@ -68,13 +68,15 @@ Checks the action against policy and atomically claims execution in a single cal
 
 ## Requirements
 
-- **Self-hosted or local n8n only.** Community nodes are not supported on n8n Cloud.
+- **n8n Cloud or self-hosted n8n.** On n8n Cloud, Guardian is a verified node that the instance owner installs from the nodes panel.
 - You need a Guardian API key from your Guardian dashboard.
 
 ## Setup
 
 ### 1. Install the node
-In your n8n instance go to **Settings → Community Nodes → Install** and enter:
+**n8n Cloud:** as the instance owner, open the nodes panel (+) on any workflow, search for "Guardian", choose the node with the verified badge and click **Install**.
+
+**Self-hosted n8n:** go to **Settings → Community Nodes → Install** and enter:
 ```
 n8n-nodes-guardian
 ```

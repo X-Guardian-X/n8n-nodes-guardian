@@ -53,6 +53,39 @@ function sameEvents(actual: string[], expected: string[]): boolean {
 	return actual.length === expected.length && expected.every((event) => actual.includes(event));
 }
 
+// A "test run" (Execute Workflow / chat panel in the editor) temporarily
+// activates this trigger's webhooks on an ephemeral /webhook-test/... URL,
+// runs webhookMethods exactly like a real publish, and tears it back down
+// (checkExists/create, then delete) a couple of minutes later. If create()
+// registered that test URL with Guardian, the backend's own (workflowId,
+// nodeId) binding update (see registerBoundWebhook in backend/src/routes/
+// webhooks.ts) REPLACES the real, published production URL in place — and
+// the matching delete() then removes the registration entirely. The
+// workflow is still shown as Published in n8n, but Guardian has no
+// (or a now-stale) URL for it until the user deactivates and reactivates
+// the real workflow. Test runs must never touch the published registration.
+//
+// getActivationMode() === 'manual' is exactly n8n's own signal for this:
+// WorkflowActivateMode is 'init' | 'create' | 'update' | 'activate' |
+// 'manual' | 'leadershipChange' — 'manual' is used for a temporary
+// editor/chat test listener, never for a real publish/unpublish. The
+// webhook URL itself is checked too (n8n routes test runs through
+// /webhook-test/..., as opposed to /webhook/... for production) as a
+// second, independent signal — belt-and-braces, since either one alone
+// being wrong in some future n8n version must not silently reintroduce
+// this bug. getActivationMode is called defensively (optional chaining):
+// real n8n always provides it on IHookFunctions, but this keeps the check
+// from throwing if a future n8n version or a test harness omits it —
+// falling back to the URL check alone in that case.
+function isTestModeHook(context: IHookFunctions): boolean {
+	if (context.getActivationMode?.() === 'manual') return true;
+	const webhookUrl = context.getNodeWebhookUrl('default');
+	return typeof webhookUrl === 'string' && webhookUrl.includes('/webhook-test/');
+}
+
+const TEST_MODE_NOTICE =
+	'Guardian Approval Trigger: this is a test run (temporary n8n webhook URL) — Guardian is not contacted and the published registration is left untouched. Approvals only arrive once this workflow is published.';
+
 export class GuardianApprovalTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Guardian Approval Trigger',
@@ -123,6 +156,14 @@ export class GuardianApprovalTrigger implements INodeType {
 	webhookMethods = {
 		default: {
 			async checkExists(this: IHookFunctions): Promise<boolean> {
+				if (isTestModeHook(this)) {
+					// Report "already exists" so n8n does NOT call create() for this
+					// test listener — the published registration (if any) is left
+					// completely alone, and no Guardian call is made.
+					this.logger.info(TEST_MODE_NOTICE);
+					return true;
+				}
+
 				const webhookUrl = this.getNodeWebhookUrl('default');
 				if (!webhookUrl) {
 					throw new NodeOperationError(this.getNode(), 'n8n could not generate the Guardian webhook URL');
@@ -153,6 +194,15 @@ export class GuardianApprovalTrigger implements INodeType {
 				return true;
 			},
 			async create(this: IHookFunctions): Promise<boolean> {
+				if (isTestModeHook(this)) {
+					// checkExists() already returns true in test mode, so n8n should
+					// never reach here — this is a second, independent guard in case
+					// n8n ever calls create() directly without checkExists() first.
+					// No Guardian call, no static-data change.
+					this.logger.info(TEST_MODE_NOTICE);
+					return true;
+				}
+
 				const webhookUrl = this.getNodeWebhookUrl('default');
 				if (!webhookUrl) {
 					throw new NodeOperationError(this.getNode(), 'n8n could not generate the Guardian webhook URL');
@@ -219,6 +269,16 @@ export class GuardianApprovalTrigger implements INodeType {
 				return true;
 			},
 			async delete(this: IHookFunctions): Promise<boolean> {
+				if (isTestModeHook(this)) {
+					// The test listener is tearing down (~2 minutes after the test run
+					// started). Since create() never registered anything with Guardian
+					// for it, there is nothing to delete — and the published
+					// registration's webhookId/secret/url (if any) must survive this
+					// untouched. No Guardian call, no static-data change.
+					this.logger.info(TEST_MODE_NOTICE);
+					return true;
+				}
+
 				const staticData = this.getWorkflowStaticData('node') as GuardianWebhookStaticData;
 				if (staticData.webhookId) {
 					try {
